@@ -232,25 +232,37 @@ Files that fail (parse errors, connection errors, etc.):
 
 ## Scheduling
 
-### Windows Task Scheduler
+### Configured Tasks (5 AM and 7 AM Eastern)
 
-1. Open Task Scheduler
-2. Create Basic Task
-3. Set trigger: Daily at desired time (e.g., 2:00 AM)
-4. Action: Start a program
-   - Program: `D:\GitHub\hazeydata\theme-park-crowd-report\venv\Scripts\python.exe`
-   - Arguments: `src/get_tp_wait_time_data_from_s3.py`
-   - Start in: `D:\GitHub\hazeydata\theme-park-crowd-report`
+Two Windows scheduled tasks run the ETL **daily**:
 
-**Why scheduled**: Automates daily data processing without manual intervention.
+| Task | Time | Purpose |
+|------|------|---------|
+| **ThemeParkWaitTimeETL_5am** | 5:00 AM Eastern | Primary daily run |
+| **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup (e.g. if 5 AM didn’t run or S3 updates were late) |
 
-### PowerShell Scheduled Job
+The **process lock** (`state/processing.lock`) ensures the 7 AM run does not overlap the 5 AM run. If 5 AM is still running at 7 AM, the second task will exit with “another instance is running” and can be retried later.
+
+**Register the tasks** (run once, or after changes):
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute "D:\GitHub\hazeydata\theme-park-crowd-report\venv\Scripts\python.exe" -Argument "src/get_tp_wait_time_data_from_s3.py" -WorkingDirectory "D:\GitHub\hazeydata\theme-park-crowd-report"
-$trigger = New-ScheduledTaskTrigger -Daily -At 2:00AM
-Register-ScheduledTask -TaskName "ThemeParkCrowdReport" -Action $action -Trigger $trigger
+powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 ```
+
+The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\theme-park-crowd-report`. Edit `scripts/register_scheduled_tasks.ps1` if your Python path or project root differ.
+
+**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkWaitTimeETL_7am`.
+
+**Time zone**: Tasks use the **system local time**. Set Windows to Eastern Time so 5:00 AM and 7:00 AM are Eastern.
+
+### Manual Setup (Windows Task Scheduler)
+
+1. Open Task Scheduler → Create Basic Task
+2. Trigger: Daily at desired time (e.g. 5:00 AM)
+3. Action: Start a program
+   - Program: `C:\Python314\python.exe` (or your `python.exe` path)
+   - Arguments: `src/get_tp_wait_time_data_from_s3.py`
+   - Start in: `d:\GitHub\hazeydata\theme-park-crowd-report`
 
 ## Monitoring
 

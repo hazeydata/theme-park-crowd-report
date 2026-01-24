@@ -1,10 +1,24 @@
 # Scripts Directory
 
-This directory is reserved for standalone utility scripts that can be run independently of the main pipeline.
+Standalone utility scripts that can be run independently of the main pipeline.
 
-## Current Usage
+## Current Scripts
 
-**Currently empty**: The main pipeline script is in `src/get_tp_wait_time_data_from_s3.py`.
+### `register_scheduled_tasks.ps1`
+
+Registers the **5 AM** and **7 AM Eastern** Windows scheduled tasks for the Theme Park Wait Time ETL.
+
+**Run once** (or after changing Python path / project root):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
+```
+
+Creates:
+- **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (primary)
+- **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (backup)
+
+See [README.md](../README.md#scheduling) for details.
 
 ## Potential Future Scripts
 
