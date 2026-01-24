@@ -39,7 +39,7 @@ Register-ScheduledTask `
     -Force
 Write-Host "Registered: ThemeParkWaitTimeETL_7am (Daily 7:00 AM)"
 
-# 6:00 AM daily – dimension table fetches (entity, park hours, events)
+# 6:00 AM daily – dimension fetches (entity, park hours, events, metatable) + build dimdategroupid, dimseason
 $DimScript = Join-Path $ProjectRoot "scripts\run_dimension_fetches.ps1"
 $DimAction = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
@@ -51,7 +51,7 @@ Register-ScheduledTask `
     -Action $DimAction `
     -Trigger $Trigger6 `
     -Settings $Settings `
-    -Description "Theme Park dimension tables - daily 6 AM Eastern. Fetches entity, park hours, events from S3." `
+    -Description "Theme Park dimension tables - daily 6 AM Eastern. Fetches entity, park hours, events, metatable from S3; builds dimdategroupid, dimseason." `
     -Force
 Write-Host "Registered: ThemeParkDimensionFetch_6am (Daily 6:00 AM)"
 

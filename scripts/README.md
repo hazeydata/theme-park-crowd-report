@@ -16,14 +16,14 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 
 Creates:
 - **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (wait-time ETL, primary)
-- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM (entity, park hours, events from S3)
+- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM (entity, park hours, events, metatable from S3; build dimdategroupid, dimseason)
 - **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (wait-time ETL, backup)
 
 See [README.md](../README.md#scheduling) for details.
 
 ### `run_dimension_fetches.ps1`
 
-Runs the three dimension-table fetch scripts in sequence: `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`. Uses default `--output-base` (Dropbox). Invoked by **ThemeParkDimensionFetch_6am**; can also be run manually:
+Runs the dimension-table fetch scripts and builds in sequence: `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, `build_dimseason.py` (metatable from S3; dimdategroupid and dimseason built locally). Writes to **output/** under the project root (`output/dimension_tables/`, `output/logs/`) via `--output-base`. Invoked by **ThemeParkDimensionFetch_6am**; can also be run manually:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_dimension_fetches.ps1

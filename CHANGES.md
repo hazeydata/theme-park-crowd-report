@@ -4,14 +4,34 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Metatable (dimMetatable) and Season (dimSeason)
+
+**Added**:
+- `src/get_metatable_from_s3.py` — Fetches `current_metatable.csv` from `s3://touringplans_stats/export/metatable/`, writes `dimension_tables/dimmetatable.csv`. Park-day metadata (extra magic hours, parades, closures, etc.). No transformation. Adapted from legacy Julia `run_dimMetatable.jl`. Logs: `logs/get_metatable_*.log`.
+- `src/build_dimseason.py` — Reads `dimension_tables/dimdategroupid.csv`, assigns `season` and `season_year` from `date_group_id` patterns (CHRISTMAS_PEAK, holiday carry, Presidents+Mardi Gras combined window, seasonal buckets). Writes `dimension_tables/dimseason.csv`. Depends on dimdategroupid. Adapted from legacy Julia `run_dimSeason.jl`; always overwrites. Logs: `logs/build_dimseason_*.log`.
+- Both added to `scripts/run_dimension_fetches.ps1` (6 AM job): metatable with S3 fetches, dimseason after dimdategroupid.
+
+**Why**: Metatable for park-day metadata; season/season_year for modeling and cohort analysis.
+
+### Date group ID (dimDateGroupID) build
+
+**Added**:
+- `src/build_dimdategroupid.py` — Builds `dimension_tables/dimdategroupid.csv` locally (no S3). Combines date spine (2005-01-01 through today + 2 years), holiday codes/names, and `date_group_id`. "Today" = Eastern park_day (6 AM rule). Adapted from legacy Julia `run_dimDate.jl`, `run_dimHolidays.jl`, `run_dimDateGroupID.jl`; always overwrites.
+- Logs: `logs/build_dimdategroupid_*.log`
+- Added to `scripts/run_dimension_fetches.ps1` (6 AM job).
+
+**Why**: Single dimension table for date context, holidays, and date_group_id for modeling and cohort analysis.
+
 ### Schedule dimension table fetches (6 AM Eastern)
 
 **Added**:
-- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM Eastern. Runs `scripts/run_dimension_fetches.ps1`, which invokes entity, park-hours, and events fetches from S3 in sequence.
-- `scripts/run_dimension_fetches.ps1` — Runs `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`; exits on first failure.
+- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM Eastern. Runs `scripts/run_dimension_fetches.ps1`, which invokes entity, park-hours, events, metatable fetches from S3, then `build_dimdategroupid.py`, `build_dimseason.py`, in sequence.
+- `scripts/run_dimension_fetches.ps1` — Runs `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, `build_dimseason.py`; writes to **output/** under project root (`output/dimension_tables/`, `output/logs/`); exits on first failure.
 - `scripts/register_scheduled_tasks.ps1` updated to register the 6 AM task.
 
-**Why**: Keep dimension tables (dimentity, dimparkhours, dimeventdays, dimevents) updated daily without manual runs.
+**Why**: Keep dimension tables (dimentity, dimparkhours, dimeventdays, dimevents, dimmetatable, dimdategroupid, dimseason) updated daily without manual runs.
+
+**Use output/dimension_tables**: Removed repo-root `dimension_tables/`; dimension fetch now uses `output/dimension_tables/` via `--output-base` (project `output/`). Aligns with existing `output/` layout.
 
 ### Events from S3
 

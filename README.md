@@ -143,6 +143,39 @@ python src/get_events_from_s3.py --output-base "D:\Custom\Path"
 
 **What it does**: Downloads `current_event_days.csv` (events by day using event codes) and `current_events.csv` (lookup table for event codes) from `s3://touringplans_stats/export/events/`, and writes `dimension_tables/dimeventdays.csv` and `dimension_tables/dimevents.csv` under the output base. Same S3 bucket and AWS credentials as the wait-time ETL. Other files in export/events/ (e.g. event_days_*.csv, events_*.csv) are ignored.
 
+### Date group ID (dimDateGroupID)
+
+Builds the date-group dimension table locally (no S3):
+
+```powershell
+python src/build_dimdategroupid.py
+python src/build_dimdategroupid.py --output-base "D:\Custom\Path"
+```
+
+**What it does**: Builds a combined dimension table with date spine (2005-01-01 through today + 2 years), holiday codes/names (Easter, MLK, Thanksgiving, etc.), and `date_group_id` for modeling and cohort analysis. Uses "today" = Eastern park_day (6 AM rule). Writes `dimension_tables/dimdategroupid.csv` under the output base. Adapted from legacy Julia `run_dimDate.jl`, `run_dimHolidays.jl`, `run_dimDateGroupID.jl`; always overwrites.
+
+### Metatable (dimMetatable)
+
+Fetches park-day metadata (extra magic hours, parades, closures, etc.) from S3:
+
+```powershell
+python src/get_metatable_from_s3.py
+python src/get_metatable_from_s3.py --output-base "D:\Custom\Path"
+```
+
+**What it does**: Downloads `current_metatable.csv` from `s3://touringplans_stats/export/metatable/` and writes `dimension_tables/dimmetatable.csv` under the output base. No transformation. Adapted from legacy Julia `run_dimMetatable.jl`.
+
+### Season (dimSeason)
+
+Builds season labels from dimdategroupid (holidays, carry, Presidents+Mardi Gras, seasonal buckets):
+
+```powershell
+python src/build_dimseason.py
+python src/build_dimseason.py --output-base "D:\Custom\Path"
+```
+
+**What it does**: Reads `dimension_tables/dimdategroupid.csv`, assigns `season` and `season_year` from `date_group_id` patterns (CHRISTMAS_PEAK, holiday carry, Presidents+Mardi Gras combined window, AFTER_EASTER/BEFORE_EASTER, SPRING/SUMMER/AUTUMN/WINTER). Writes `dimension_tables/dimseason.csv`. Depends on dimdategroupid; run `build_dimdategroupid` first. Adapted from legacy Julia `run_dimSeason.jl`; always overwrites.
+
 ## Output Structure
 
 The script creates organized CSV files under the output base directory:
@@ -159,7 +192,10 @@ output_base/
 │   ├── dimentity.csv                   # Entity table; src/get_entity_table_from_s3.py
 │   ├── dimparkhours.csv                # Park hours; src/get_park_hours_from_s3.py
 │   ├── dimeventdays.csv                # Events by day; src/get_events_from_s3.py
-│   └── dimevents.csv                   # Event lookup; src/get_events_from_s3.py
+│   ├── dimevents.csv                   # Event lookup; src/get_events_from_s3.py
+│   ├── dimmetatable.csv                # Park-day metadata (EMH, parades, closures); src/get_metatable_from_s3.py
+│   ├── dimdategroupid.csv              # Date + holidays + date_group_id; src/build_dimdategroupid.py
+│   └── dimseason.csv                   # Season + season_year; src/build_dimseason.py
 ├── samples/
 │   └── YYYY-MM/
 │       └── wait_time_fact_table_sample.csv  # Random sample for testing
@@ -172,7 +208,10 @@ output_base/
     ├── get_tp_wait_time_data_*.log
     ├── get_entity_table_*.log
     ├── get_park_hours_*.log
-    └── get_events_*.log
+    ├── get_events_*.log
+    ├── get_metatable_*.log
+    ├── build_dimdategroupid_*.log
+    └── build_dimseason_*.log
 ```
 
 ### CSV File Format
@@ -280,10 +319,10 @@ Three Windows scheduled tasks run **daily**:
 | Task | Time | Purpose |
 |------|------|---------|
 | **ThemeParkWaitTimeETL_5am** | 5:00 AM Eastern | Primary wait-time ETL run |
-| **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events from S3 → dimension_tables |
+| **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events, metatable from S3; builds dimdategroupid, dimseason → dimension_tables |
 | **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup ETL (e.g. if 5 AM didn’t run or S3 updates were late) |
 
-The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, and `get_events_from_s3.py` in sequence. It uses the same output base as the ETL (default Dropbox) and does not use the lock.
+The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, and `build_dimseason.py` in sequence. It writes to **output/** under the project root (`output/dimension_tables/`, `output/logs/`) and does not use the lock.
 
 **Register the tasks** (run once, or after changes):
 

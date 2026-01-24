@@ -12,6 +12,9 @@ theme-park-crowd-report/
 │   ├── get_entity_table_from_s3.py   # Entity dimension table from S3
 │   ├── get_park_hours_from_s3.py     # Park hours dimension table from S3
 │   ├── get_events_from_s3.py         # Events dimension tables from S3
+│   ├── get_metatable_from_s3.py      # Metatable (park-day metadata) from S3
+│   ├── build_dimdategroupid.py       # Date + holidays + date_group_id (built locally)
+│   ├── build_dimseason.py            # Season + season_year from dimdategroupid (built locally)
 │   ├── parsers/                      # Data parsers for different formats
 │   │   ├── __init__.py
 │   │   └── wait_time_parsers.py      # Standby and fastpass parsers
@@ -85,6 +88,19 @@ Contains all application logic organized into modules:
 - **`get_events_from_s3.py`**: Fetches events dimension data from S3
   - Downloads `current_event_days.csv` and `current_events.csv` from `export/events/`
   - Writes `dimension_tables/dimeventdays.csv` (events by day) and `dimension_tables/dimevents.csv` (event lookup)
+
+- **`get_metatable_from_s3.py`**: Fetches metatable (park-day metadata: EMH, parades, closures) from S3
+  - Downloads `current_metatable.csv` from `export/metatable/`
+  - Writes `dimension_tables/dimmetatable.csv` under output base
+
+- **`build_dimdategroupid.py`**: Builds date-group dimension table locally (no S3)
+  - Date spine 2005-01-01 through today + 2 years; "today" = Eastern park_day (6 AM rule)
+  - Holiday codes/names (Easter, MLK, Thanksgiving, NJC, PMP/PMM, etc.) and `date_group_id`
+  - Writes `dimension_tables/dimdategroupid.csv` under output base. Adapted from legacy Julia dimDate, dimHolidays, dimDateGroupID.
+
+- **`build_dimseason.py`**: Builds season dimension table from dimdategroupid (no S3)
+  - Reads `dimension_tables/dimdategroupid.csv`; assigns `season` and `season_year` from `date_group_id` patterns (CHRISTMAS_PEAK, holiday carry, Presidents+Mardi Gras combined window, seasonal buckets)
+  - Writes `dimension_tables/dimseason.csv` under output base. Depends on dimdategroupid. Adapted from legacy Julia `run_dimSeason.jl`.
   
 - **`parsers/wait_time_parsers.py`**: Modular parsers for different data formats
   - `parse_standby_chunk()`: Parses standby wait time data
@@ -139,18 +155,18 @@ Temporary files directory. Can be cleaned up between runs.
 
 **Why**: Provides a dedicated space for truly temporary files.
 
-### `output/` - Final Output (Deprecated)
+### `output/` - Output Directory
 
-**Note**: This directory is not currently used. Output goes to the configured output base directory (default: Dropbox location).
+**Note**: The **6 AM dimension fetch** (`run_dimension_fetches.ps1`) writes to `output/`: `output/dimension_tables/`, `output/logs/`. The wait-time ETL uses a configurable output base (default: Dropbox) unless `--output-base` points here.
 
-The actual output structure is:
+The output structure under an output base (e.g. `output/` or Dropbox) is:
 ```
 output_base/
 ├── fact_tables/clean/YYYY-MM/    # CSV files by park and date
-├── dimension_tables/             # dimentity.csv, dimparkhours.csv, dimeventdays.csv, dimevents.csv
+├── dimension_tables/             # dimentity, dimparkhours, dimeventdays, dimevents, dimmetatable, dimdategroupid, dimseason
 ├── samples/YYYY-MM/              # Sample CSV files
 ├── state/                        # dedupe.sqlite, processed_files.json, failed_files.json, processing.lock
-└── logs/                         # Log files (wait-time ETL, entity table)
+└── logs/                         # wait-time ETL, entity, park hours, events, metatable, build_dimdategroupid, build_dimseason
 ```
 
 **Why separate from code**: Keeps data separate from source code, makes it easier to manage large datasets.

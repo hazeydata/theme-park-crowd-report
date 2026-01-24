@@ -9,6 +9,9 @@ Each run creates a new log file with a timestamp:
 - **Entity table**: `get_entity_table_YYYYMMDD_HHMMSS.log`
 - **Park hours**: `get_park_hours_YYYYMMDD_HHMMSS.log`
 - **Events**: `get_events_YYYYMMDD_HHMMSS.log`
+- **Metatable**: `get_metatable_YYYYMMDD_HHMMSS.log`
+- **Date group ID**: `build_dimdategroupid_YYYYMMDD_HHMMSS.log`
+- **Season**: `build_dimseason_YYYYMMDD_HHMMSS.log`
 - Example: `get_tp_wait_time_data_20240122_143201.log`
 
 ## Log Contents
