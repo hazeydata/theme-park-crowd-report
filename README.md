@@ -282,6 +282,20 @@ Check `logs/` directory for detailed processing logs:
 
 **Why track state**: Enables incremental processing, prevents duplicate work, and avoids retrying files that cannot be parsed.
 
+### Validation
+
+Run `scripts/validate_wait_times.py` to check fact table CSVs for schema issues, invalid `wait_time_minutes` ranges, and outliers (e.g. POSTED/ACTUAL ≥ 300). Reports are written to `validation/` under the output base. **Exit 1** if any invalid rows; **0** otherwise. See [scripts/README.md](scripts/README.md#validate_wait_timespy) for options.
+
+### Wait Time DB Report
+
+Run `scripts/report_wait_time_db.py` for an **easily consumable Markdown report** of what's in the fact table:
+
+- **Summary**: date range, parks, park-day count, total rows
+- **By park**: file count, row count, date range per park
+- **Recent coverage**: grid of last N days × parks (✓/— or row counts)
+
+Report path: `reports/wait_time_db_report.md` under the output base (overwritten each run). Use `--quick` to skip row counts for faster daily checks on slow paths. See [scripts/README.md](scripts/README.md#report_wait_time_dbpy).
+
 ## Troubleshooting
 
 ### Script Fails Mid-Run

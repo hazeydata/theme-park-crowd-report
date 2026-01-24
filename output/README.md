@@ -22,6 +22,10 @@ output_base/
 │   ├── processed_files.json
 │   ├── failed_files.json
 │   └── processing.lock
+├── validation/
+│   └── validate_wait_times_*.json   # From scripts/validate_wait_times.py
+├── reports/
+│   └── wait_time_db_report.md       # Wait time DB summary; scripts/report_wait_time_db.py
 └── logs/
     └── get_tp_wait_time_data_*.log
 ```

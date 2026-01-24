@@ -20,6 +20,50 @@ Creates:
 
 See [README.md](../README.md#scheduling) for details.
 
+### `validate_wait_times.py`
+
+Validates wait time fact table CSVs under `fact_tables/clean/`:
+
+- **Schema**: Required columns (`entity_code`, `observed_at`, `wait_time_type`, `wait_time_minutes`), valid `wait_time_type` values.
+- **Ranges**:
+  - **POSTED / ACTUAL**: 0–1000 (invalid outside); **outlier** if ≥ 300.
+  - **PRIORITY**: -100–2000 or 8888 (sold out); **outlier** if &lt; -100 or &gt; 2000 and ≠ 8888.
+
+Writes a JSON report to `validation/validate_wait_times_YYYYMMDD_HHMMSS.json` under the output base. Exits **1** if any invalid rows; **0** otherwise. Outliers are flagged but do not fail the run.
+
+**Run**:
+
+```powershell
+python scripts/validate_wait_times.py
+python scripts/validate_wait_times.py --lookback-days 14
+python scripts/validate_wait_times.py --all
+python scripts/validate_wait_times.py --output-base "D:\Path" --report validation/custom.json
+```
+
+**Options**: `--output-base`, `--lookback-days` (default 7), `--all`, `--report`.
+
+### `report_wait_time_db.py`
+
+Produces an **easily consumable Markdown report** of what's in the wait time fact table. Scans `fact_tables/clean/YYYY-MM/{park}_{date}.csv` (same layout as ETL output) and writes a report with:
+
+1. **Summary** — Date range, parks, park-day (file) count, total rows (or “—” with `--quick`)
+2. **By park** — Per-park: file count, row count (or omitted with `--quick`), date range
+3. **Recent coverage** — Grid: last N days × parks. Cells show ✓ (file exists) / — (no file) with `--quick`, or row counts otherwise.
+
+Report path: `reports/wait_time_db_report.md` under the output base. **Overwritten each run** so you can always open the same file for daily or ad-hoc checks.
+
+**When to use `--quick`**: Skip row counts; grid shows ✓/— only. Faster on slow or remote paths (e.g. Dropbox). Use for quick daily coverage checks.
+
+**Run**:
+
+```powershell
+python scripts/report_wait_time_db.py
+python scripts/report_wait_time_db.py --quick --lookback-days 7
+python scripts/report_wait_time_db.py --output-base "D:\Path" --report reports/db_report.md
+```
+
+**Options**: `--output-base`, `--report`, `--lookback-days` (default 14), `--quick`.
+
 ## Potential Future Scripts
 
 Examples of scripts that might go here:

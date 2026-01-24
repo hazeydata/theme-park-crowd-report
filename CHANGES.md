@@ -4,6 +4,32 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Wait Time DB Report
+
+**Added**:
+- `scripts/report_wait_time_db.py` — Easily consumable Markdown report of what's in the wait time fact table
+- Summary: date range, parks, park-day count, total rows (or — with `--quick`)
+- By-park table: files, rows, date range
+- Recent-coverage grid: last N days × parks (✓/— or row counts)
+- Report path: `reports/wait_time_db_report.md` under output base (overwritten each run)
+- `--quick`: skip row counts; grid shows ✓/— only (faster on slow paths)
+- `--lookback-days` (default 14), `--output-base`, `--report`
+
+**Why**: Daily or ad-hoc visibility into coverage and freshness without querying raw CSVs.
+
+**Report step wrap-up**: `report_wait_time_db.py` now includes extensive module docstring (PURPOSE, OUTPUT, MODES), section headers, and inline comments. README and `scripts/README` updated.
+
+### Wait Time Validation Script
+
+**Added**:
+- `scripts/validate_wait_times.py` — Validates fact table CSVs (schema, ranges, outliers)
+- **POSTED/ACTUAL**: valid 0–1000; outlier if ≥ 300
+- **PRIORITY**: valid -100–2000 or 8888; outlier if &lt; -100 or &gt; 2000 and ≠ 8888
+- JSON report to `validation/`; exit 1 on invalid rows
+- `--lookback-days`, `--all`, `--output-base`, `--report`
+
+**Why**: React quickly to missing or faulty data before downstream modeling and WTI.
+
 ### Script Documentation and Wrap-Up
 
 **What changed**:
