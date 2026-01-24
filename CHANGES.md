@@ -4,6 +4,19 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Entity table from S3
+
+**Added**:
+- `src/get_entity_table_from_s3.py` — Fetches entity dimension data from S3 and builds `dimension_tables/dimentity.csv`
+- Source: `s3://touringplans_stats/export/entities/` — files `current_dlr_entities.csv`, `current_tdr_entities.csv`, `current_uor_entities.csv`, `current_ush_entities.csv`, `current_wdw_entities.csv`
+- Combines with union of columns; normalizes `land` column (add if missing, consistent type)
+- Same S3 bucket and boto3 retry config as wait-time ETL; `--output-base` to match
+- Logs: `logs/get_entity_table_*.log`
+
+**Why**: Auxiliary entity data needed for modeling, WTI, and joining with wait-time fact tables.
+
+**Entity table wrap-up**: `get_entity_table_from_s3.py` now includes extensive module docstring (PURPOSE, S3 SOURCE, OUTPUT, USAGE), section headers, step comments (STEP 1–4 in main), and inline descriptions. README, logs/README, and output docs updated.
+
 ### Wait Time DB Report
 
 **Added**:

@@ -9,6 +9,7 @@ theme-park-crowd-report/
 ├── src/                              # Main source code package
 │   ├── __init__.py                   # Package marker
 │   ├── get_tp_wait_time_data_from_s3.py  # Main ETL script
+│   ├── get_entity_table_from_s3.py   # Entity dimension table from S3
 │   ├── parsers/                      # Data parsers for different formats
 │   │   ├── __init__.py
 │   │   └── wait_time_parsers.py      # Standby and fastpass parsers
@@ -69,6 +70,11 @@ Contains all application logic organized into modules:
   - Routes to appropriate parsers
   - Deduplicates via SQLite; writes CSV per (park, date)
   - Uses process lock to prevent concurrent runs
+
+- **`get_entity_table_from_s3.py`**: Fetches entity dimension data from S3
+  - Downloads `current_*_entities.csv` from `export/entities/` (dlr, tdr, uor, ush, wdw)
+  - Combines with union of columns; normalizes `land` column
+  - Writes `dimension_tables/dimentity.csv` under output base
   
 - **`parsers/wait_time_parsers.py`**: Modular parsers for different data formats
   - `parse_standby_chunk()`: Parses standby wait time data
@@ -131,9 +137,10 @@ The actual output structure is:
 ```
 output_base/
 ├── fact_tables/clean/YYYY-MM/    # CSV files by park and date
+├── dimension_tables/             # dimentity.csv (entity table from S3)
 ├── samples/YYYY-MM/              # Sample CSV files
 ├── state/                        # dedupe.sqlite, processed_files.json, failed_files.json, processing.lock
-└── logs/                         # Log files
+└── logs/                         # Log files (wait-time ETL, entity table)
 ```
 
 **Why separate from code**: Keeps data separate from source code, makes it easier to manage large datasets.

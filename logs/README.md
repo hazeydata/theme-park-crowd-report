@@ -4,8 +4,9 @@ This directory contains processing logs from pipeline runs.
 
 ## What's Stored Here
 
-Each run of the pipeline creates a new log file with a timestamp:
-- Format: `get_tp_wait_time_data_YYYYMMDD_HHMMSS.log`
+Each run creates a new log file with a timestamp:
+- **Wait-time ETL**: `get_tp_wait_time_data_YYYYMMDD_HHMMSS.log`
+- **Entity table**: `get_entity_table_YYYYMMDD_HHMMSS.log`
 - Example: `get_tp_wait_time_data_20240122_143201.log`
 
 ## Log Contents
