@@ -273,16 +273,17 @@ Files that fail (parse errors, connection errors, etc.):
 
 ## Scheduling
 
-### Configured Tasks (5 AM and 7 AM Eastern)
+### Configured Tasks (5 AM, 6 AM, 7 AM Eastern)
 
-Two Windows scheduled tasks run the ETL **daily**:
+Three Windows scheduled tasks run **daily**:
 
 | Task | Time | Purpose |
 |------|------|---------|
-| **ThemeParkWaitTimeETL_5am** | 5:00 AM Eastern | Primary daily run |
-| **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup (e.g. if 5 AM didn’t run or S3 updates were late) |
+| **ThemeParkWaitTimeETL_5am** | 5:00 AM Eastern | Primary wait-time ETL run |
+| **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events from S3 → dimension_tables |
+| **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup ETL (e.g. if 5 AM didn’t run or S3 updates were late) |
 
-The **process lock** (`state/processing.lock`) ensures the 7 AM run does not overlap the 5 AM run. If 5 AM is still running at 7 AM, the second task will exit with “another instance is running” and can be retried later.
+The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, and `get_events_from_s3.py` in sequence. It uses the same output base as the ETL (default Dropbox) and does not use the lock.
 
 **Register the tasks** (run once, or after changes):
 
@@ -292,9 +293,9 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 
 The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\theme-park-crowd-report`. Edit `scripts/register_scheduled_tasks.ps1` if your Python path or project root differ.
 
-**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkWaitTimeETL_7am`.
+**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkDimensionFetch_6am` / `ThemeParkWaitTimeETL_7am`.
 
-**Time zone**: Tasks use the **system local time**. Set Windows to Eastern Time so 5:00 AM and 7:00 AM are Eastern.
+**Time zone**: Tasks use the **system local time**. Set Windows to Eastern Time so 5:00, 6:00, and 7:00 AM are Eastern.
 
 ### Manual Setup (Windows Task Scheduler)
 

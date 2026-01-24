@@ -6,7 +6,7 @@ Standalone utility scripts that can be run independently of the main pipeline.
 
 ### `register_scheduled_tasks.ps1`
 
-Registers the **5 AM** and **7 AM Eastern** Windows scheduled tasks for the Theme Park Wait Time ETL.
+Registers the **5 AM**, **6 AM**, and **7 AM Eastern** Windows scheduled tasks.
 
 **Run once** (or after changing Python path / project root):
 
@@ -15,10 +15,21 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 ```
 
 Creates:
-- **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (primary)
-- **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (backup)
+- **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (wait-time ETL, primary)
+- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM (entity, park hours, events from S3)
+- **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (wait-time ETL, backup)
 
 See [README.md](../README.md#scheduling) for details.
+
+### `run_dimension_fetches.ps1`
+
+Runs the three dimension-table fetch scripts in sequence: `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`. Uses default `--output-base` (Dropbox). Invoked by **ThemeParkDimensionFetch_6am**; can also be run manually:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_dimension_fetches.ps1
+```
+
+Exits with an error if any script fails.
 
 ### `validate_wait_times.py`
 

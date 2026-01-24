@@ -4,6 +4,15 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Schedule dimension table fetches (6 AM Eastern)
+
+**Added**:
+- **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM Eastern. Runs `scripts/run_dimension_fetches.ps1`, which invokes entity, park-hours, and events fetches from S3 in sequence.
+- `scripts/run_dimension_fetches.ps1` — Runs `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`; exits on first failure.
+- `scripts/register_scheduled_tasks.ps1` updated to register the 6 AM task.
+
+**Why**: Keep dimension tables (dimentity, dimparkhours, dimeventdays, dimevents) updated daily without manual runs.
+
 ### Events from S3
 
 **Added**:
