@@ -30,7 +30,7 @@ DATE RANGE
 OUTPUT
 ================================================================================
   - dimension_tables/dimdategroupid.csv under --output-base
-  - Logs: logs/build_dimdategroupid_YYYYMMDD_HHMMSS.log
+  - Logs: output/logs/build_dimdategroupid_YYYYMMDD_HHMMSS.log
 
 ================================================================================
 USAGE
@@ -58,9 +58,8 @@ from zoneinfo import ZoneInfo
 START_DATE = date(2005, 1, 1)
 YEARS_AHEAD = 2
 EASTERN = ZoneInfo("America/New_York")
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
+# Default to project's output/ directory (relative to script location)
+DEFAULT_OUTPUT_BASE = Path(__file__).parent.parent / "output"
 DIMDATEGROUPID_NAME = "dimdategroupid.csv"
 
 # Holiday code -> date_group_id label (Julia direct_map). Uppercased on output.
