@@ -16,7 +16,9 @@ output_base/
 │           └── epcot_2024-01-16.csv
 ├── dimension_tables/
 │   ├── dimentity.csv             # Entity table; src/get_entity_table_from_s3.py
-│   └── dimparkhours.csv          # Park hours; src/get_park_hours_from_s3.py
+│   ├── dimparkhours.csv          # Park hours; src/get_park_hours_from_s3.py
+│   ├── dimeventdays.csv          # Events by day; src/get_events_from_s3.py
+│   └── dimevents.csv             # Event lookup; src/get_events_from_s3.py
 ├── samples/
 │   └── YYYY-MM/
 │       └── wait_time_fact_table_sample.csv
@@ -32,7 +34,8 @@ output_base/
 └── logs/
     ├── get_tp_wait_time_data_*.log
     ├── get_entity_table_*.log
-    └── get_park_hours_*.log
+    ├── get_park_hours_*.log
+    └── get_events_*.log
 ```
 
 ## Why Not This Directory?

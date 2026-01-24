@@ -4,6 +4,17 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Events from S3
+
+**Added**:
+- `src/get_events_from_s3.py` — Fetches events dimension data from S3 and builds two dimension tables
+- Source: `s3://touringplans_stats/export/events/` — `current_event_days.csv` (events by day, event codes), `current_events.csv` (event lookup)
+- Writes `dimension_tables/dimeventdays.csv` and `dimension_tables/dimevents.csv` under output base
+- Other export/events/ files (event_days_*.csv, events_*.csv) ignored; same S3/boto3 pattern as entity/park-hours
+- Logs: `logs/get_events_*.log`
+
+**Why**: Auxiliary events data for modeling, WTI, and joining with wait-time fact tables.
+
 ### Park hours from S3
 
 **Added**:

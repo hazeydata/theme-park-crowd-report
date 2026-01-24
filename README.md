@@ -132,6 +132,17 @@ python src/get_park_hours_from_s3.py --output-base "D:\Custom\Path"
 
 **What it does**: Downloads `{prop}_park_hours.csv` from `s3://touringplans_stats/export/park_hours/` (dlr, tdr, uor, ush, wdw), combines them with a union of columns, and writes `dimension_tables/dimparkhours.csv` under the output base. Same S3 bucket and AWS credentials as the wait-time ETL.
 
+### Events (dimEventDays, dimEvents)
+
+Fetches events dimension data from S3 and writes two tables:
+
+```powershell
+python src/get_events_from_s3.py
+python src/get_events_from_s3.py --output-base "D:\Custom\Path"
+```
+
+**What it does**: Downloads `current_event_days.csv` (events by day using event codes) and `current_events.csv` (lookup table for event codes) from `s3://touringplans_stats/export/events/`, and writes `dimension_tables/dimeventdays.csv` and `dimension_tables/dimevents.csv` under the output base. Same S3 bucket and AWS credentials as the wait-time ETL. Other files in export/events/ (e.g. event_days_*.csv, events_*.csv) are ignored.
+
 ## Output Structure
 
 The script creates organized CSV files under the output base directory:
@@ -146,7 +157,9 @@ output_base/
 │           └── hs_2024-01-16.csv
 ├── dimension_tables/
 │   ├── dimentity.csv                   # Entity table; src/get_entity_table_from_s3.py
-│   └── dimparkhours.csv                # Park hours; src/get_park_hours_from_s3.py
+│   ├── dimparkhours.csv                # Park hours; src/get_park_hours_from_s3.py
+│   ├── dimeventdays.csv                # Events by day; src/get_events_from_s3.py
+│   └── dimevents.csv                   # Event lookup; src/get_events_from_s3.py
 ├── samples/
 │   └── YYYY-MM/
 │       └── wait_time_fact_table_sample.csv  # Random sample for testing
@@ -158,7 +171,8 @@ output_base/
 └── logs/
     ├── get_tp_wait_time_data_*.log
     ├── get_entity_table_*.log
-    └── get_park_hours_*.log
+    ├── get_park_hours_*.log
+    └── get_events_*.log
 ```
 
 ### CSV File Format
