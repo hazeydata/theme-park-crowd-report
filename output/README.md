@@ -15,7 +15,8 @@ output_base/
 │           ├── mk_2024-01-15.csv  # One file per park per date
 │           └── epcot_2024-01-16.csv
 ├── dimension_tables/
-│   └── dimentity.csv             # Entity table; src/get_entity_table_from_s3.py
+│   ├── dimentity.csv             # Entity table; src/get_entity_table_from_s3.py
+│   └── dimparkhours.csv          # Park hours; src/get_park_hours_from_s3.py
 ├── samples/
 │   └── YYYY-MM/
 │       └── wait_time_fact_table_sample.csv
@@ -30,7 +31,8 @@ output_base/
 │   └── wait_time_db_report.md       # Wait time DB summary; scripts/report_wait_time_db.py
 └── logs/
     ├── get_tp_wait_time_data_*.log
-    └── get_entity_table_*.log
+    ├── get_entity_table_*.log
+    └── get_park_hours_*.log
 ```
 
 ## Why Not This Directory?

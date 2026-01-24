@@ -4,6 +4,16 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Park hours from S3
+
+**Added**:
+- `src/get_park_hours_from_s3.py` — Fetches park-hours dimension data from S3 and builds `dimension_tables/dimparkhours.csv`
+- Source: `s3://touringplans_stats/export/park_hours/` — files `dlr_park_hours.csv`, `tdr_park_hours.csv`, `uor_park_hours.csv`, `ush_park_hours.csv`, `wdw_park_hours.csv`
+- Combines with union of columns; same S3 bucket and boto3 retry config as entity table
+- Logs: `logs/get_park_hours_*.log`
+
+**Why**: Auxiliary park-hours data for modeling, WTI, and joining with wait-time fact tables.
+
 ### Entity table from S3
 
 **Added**:

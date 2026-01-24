@@ -10,6 +10,7 @@ theme-park-crowd-report/
 │   ├── __init__.py                   # Package marker
 │   ├── get_tp_wait_time_data_from_s3.py  # Main ETL script
 │   ├── get_entity_table_from_s3.py   # Entity dimension table from S3
+│   ├── get_park_hours_from_s3.py     # Park hours dimension table from S3
 │   ├── parsers/                      # Data parsers for different formats
 │   │   ├── __init__.py
 │   │   └── wait_time_parsers.py      # Standby and fastpass parsers
@@ -75,6 +76,10 @@ Contains all application logic organized into modules:
   - Downloads `current_*_entities.csv` from `export/entities/` (dlr, tdr, uor, ush, wdw)
   - Combines with union of columns; normalizes `land` column
   - Writes `dimension_tables/dimentity.csv` under output base
+
+- **`get_park_hours_from_s3.py`**: Fetches park-hours dimension data from S3
+  - Downloads `{prop}_park_hours.csv` from `export/park_hours/` (dlr, tdr, uor, ush, wdw)
+  - Combines with union of columns; writes `dimension_tables/dimparkhours.csv` under output base
   
 - **`parsers/wait_time_parsers.py`**: Modular parsers for different data formats
   - `parse_standby_chunk()`: Parses standby wait time data
@@ -137,7 +142,7 @@ The actual output structure is:
 ```
 output_base/
 ├── fact_tables/clean/YYYY-MM/    # CSV files by park and date
-├── dimension_tables/             # dimentity.csv (entity table from S3)
+├── dimension_tables/             # dimentity.csv, dimparkhours.csv
 ├── samples/YYYY-MM/              # Sample CSV files
 ├── state/                        # dedupe.sqlite, processed_files.json, failed_files.json, processing.lock
 └── logs/                         # Log files (wait-time ETL, entity table)

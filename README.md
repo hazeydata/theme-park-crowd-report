@@ -121,6 +121,17 @@ python src/get_entity_table_from_s3.py --output-base "D:\Custom\Path"
 
 **What it does**: Downloads `current_*_entities.csv` from `s3://touringplans_stats/export/entities/` (properties: dlr, tdr, uor, ush, wdw — includes Epic Universe / EU via uor), combines them with a union of columns, normalizes the `land` column, and writes `dimension_tables/dimentity.csv` under the output base. Uses the same S3 bucket and AWS credentials as the wait-time ETL. Adapted from legacy Julia `run_dimEntity.jl`.
 
+### Park hours (dimParkHours)
+
+Fetches park-hours dimension data from S3 and writes a single master table:
+
+```powershell
+python src/get_park_hours_from_s3.py
+python src/get_park_hours_from_s3.py --output-base "D:\Custom\Path"
+```
+
+**What it does**: Downloads `{prop}_park_hours.csv` from `s3://touringplans_stats/export/park_hours/` (dlr, tdr, uor, ush, wdw), combines them with a union of columns, and writes `dimension_tables/dimparkhours.csv` under the output base. Same S3 bucket and AWS credentials as the wait-time ETL.
+
 ## Output Structure
 
 The script creates organized CSV files under the output base directory:
@@ -134,7 +145,8 @@ output_base/
 │           ├── epcot_2024-01-15.csv
 │           └── hs_2024-01-16.csv
 ├── dimension_tables/
-│   └── dimentity.csv                   # Entity table; src/get_entity_table_from_s3.py
+│   ├── dimentity.csv                   # Entity table; src/get_entity_table_from_s3.py
+│   └── dimparkhours.csv                # Park hours; src/get_park_hours_from_s3.py
 ├── samples/
 │   └── YYYY-MM/
 │       └── wait_time_fact_table_sample.csv  # Random sample for testing
@@ -145,7 +157,8 @@ output_base/
 │   └── processing.lock                 # Prevents multiple simultaneous runs
 └── logs/
     ├── get_tp_wait_time_data_*.log
-    └── get_entity_table_*.log
+    ├── get_entity_table_*.log
+    └── get_park_hours_*.log
 ```
 
 ### CSV File Format
