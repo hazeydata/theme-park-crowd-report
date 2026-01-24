@@ -1,0 +1,12 @@
+# AWS SDK for S3 access
+boto3>=1.34.0
+
+# Data processing
+pandas>=2.2.0
+pyarrow>=14.0.0
+
+# Development tools
+python-dotenv>=1.0.0
+
+# Optional: For better data validation
+pydantic>=2.5.0
