@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import sys
 import time
 from datetime import datetime
@@ -51,6 +52,7 @@ import pandas as pd
 from botocore.config import Config
 from botocore.exceptions import ClientError, ResponseStreamingError
 
+from utils import get_output_base
 
 # =============================================================================
 # CONFIGURATION
@@ -70,9 +72,6 @@ PARK_HOURS_FILES = [
     "wdw_park_hours.csv",
 ]
 
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
 DIMPARKHOURS_NAME = "dimparkhours.csv"
 MAX_RETRIES = 3
 RETRY_WAIT = [1, 2, 4]
@@ -176,8 +175,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory (dimension_tables and logs under it)",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     args = ap.parse_args()
 
@@ -212,13 +211,20 @@ def main() -> None:
     if combined is None:
         sys.exit(1)
 
-    # ----- STEP 4: Write dimension_tables/dimparkhours.csv -----
+    # ----- STEP 4: Write dimension_tables/dimparkhours.csv (atomic) -----
     dim_dir.mkdir(parents=True, exist_ok=True)
     out_path = dim_dir / DIMPARKHOURS_NAME
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     try:
-        combined.to_csv(out_path, index=False)
+        combined.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, out_path)
         logger.info(f"Wrote {out_path}")
     except Exception as e:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
         logger.error(f"Failed to write {out_path}: {e}")
         sys.exit(1)
 

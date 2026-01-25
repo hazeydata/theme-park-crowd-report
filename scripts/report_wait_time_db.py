@@ -44,16 +44,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-# Output base must match ETL (fact_tables/clean lives under it). Override with
-# --output-base.
-
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
+# Allow importing from src (for get_output_base)
+_src = Path(__file__).resolve().parent.parent / "src"
+if str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
+from utils import get_output_base
 
 
 # =============================================================================
@@ -326,8 +321,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base (fact_tables/clean under it)",
+        default=get_output_base(),
+        help="Output base (from config/config.json or default)",
     )
     ap.add_argument(
         "--report",

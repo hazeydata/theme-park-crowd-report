@@ -30,6 +30,9 @@ wheels/
 .env
 .env.local
 
+# Local config (copy from config.example.json)
+config/config.json
+
 # IDE
 .vscode/
 .idea/
@@ -60,5 +63,5 @@ work/**
 !work/README.md
 temp/**
 !temp/README.md
-logs/**
-!logs/README.md
+# Logs live only under output_base/logs; ignore repo-root logs/ if created by mistake
+logs/

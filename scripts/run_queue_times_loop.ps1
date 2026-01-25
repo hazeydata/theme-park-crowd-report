@@ -18,7 +18,15 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PythonExe   = "python"
 if ($OutputBase -eq "") {
-    $OutputBase = Join-Path $ProjectRoot "output"
+    $DefaultOutputBase = "D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
+    $CfgPath = Join-Path $ProjectRoot "config\config.json"
+    if (Test-Path $CfgPath) {
+        try {
+            $cfg = Get-Content $CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($cfg.output_base) { $DefaultOutputBase = $cfg.output_base }
+        } catch { }
+    }
+    $OutputBase = $DefaultOutputBase
 }
 
 Set-Location $ProjectRoot

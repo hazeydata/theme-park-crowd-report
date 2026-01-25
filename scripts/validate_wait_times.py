@@ -25,10 +25,12 @@ from pathlib import Path
 
 import pandas as pd
 
-# Default output base (must match ETL). Override with --output-base.
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
+# Allow importing from src (for get_output_base)
+_src = Path(__file__).resolve().parent.parent / "src"
+if str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
+from utils import get_output_base
+
 REQUIRED_COLUMNS = ["entity_code", "observed_at", "wait_time_type", "wait_time_minutes"]
 VALID_WAIT_TYPES = {"POSTED", "ACTUAL", "PRIORITY"}
 
@@ -176,8 +178,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory (fact_tables/clean under it)",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     ap.add_argument(
         "--lookback-days",

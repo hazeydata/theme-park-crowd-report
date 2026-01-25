@@ -69,7 +69,7 @@ if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 
 from parsers import parse_standby_chunk, parse_fastpass_stream
-from utils import get_wait_time_filetype
+from utils import get_output_base, get_wait_time_filetype
 
 
 # =============================================================================
@@ -81,9 +81,6 @@ DEFAULT_PROPS = ["wdw", "dlr", "uor", "ush", "tdr"]
 S3_BUCKET = "touringplans_stats"
 S3_STANDBY_PREFIX_FMT = "export/wait_times/{prop}/"
 S3_PRIORITY_PREFIX_FMT = "export/fastpass_times/{prop}/"
-
-# Default output base (Dropbox). Override with --output-base.
-DEFAULT_OUTPUT_BASE = Path(r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report")
 
 # State and output file names (under output_base/state/ and output_base/...)
 LOCAL_SAMPLE_NAME = "wait_time_fact_table_sample.csv"
@@ -493,7 +490,7 @@ def write_grouped_csvs(df: pd.DataFrame, clean_dir: Path, tz: ZoneInfo, logger: 
 def parse_args():
     ap = argparse.ArgumentParser(description="Wait Time FACT TABLE builder")
     ap.add_argument("--props", default=",".join(DEFAULT_PROPS), help="Comma-separated properties (wdw,dlr,...)")
-    ap.add_argument("--output-base", type=str, default=str(DEFAULT_OUTPUT_BASE), help="Output base directory")
+    ap.add_argument("--output-base", type=str, default=str(get_output_base()), help="Output base directory (from config/config.json or default)")
     ap.add_argument("--chunksize", type=int, default=CHUNKSIZE)
     ap.add_argument("--sample-k", type=int, default=SAMPLE_K)
     ap.add_argument("--full-rebuild", action="store_true", help="Process all files, ignore processed state")

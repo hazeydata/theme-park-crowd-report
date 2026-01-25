@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 import sys
 from datetime import datetime, timedelta
@@ -49,14 +50,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from utils import get_output_base
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
 DIMDATEGROUPID_NAME = "dimdategroupid.csv"
 DIMSEASON_NAME = "dimseason.csv"
 
@@ -198,8 +197,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory (dimension_tables and logs under it)",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     args = ap.parse_args()
 
@@ -236,10 +235,17 @@ def main() -> None:
 
     dim_dir.mkdir(parents=True, exist_ok=True)
     out_path = dim_dir / DIMSEASON_NAME
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     try:
-        out_df.to_csv(out_path, index=False)
+        out_df.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, out_path)
         logger.info(f"Wrote {out_path} ({len(out_df):,} rows)")
     except Exception as e:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
         logger.error(f"Failed to write {out_path}: {e}")
         sys.exit(1)
 

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -50,6 +51,7 @@ from pathlib import Path
 import pandas as pd
 from zoneinfo import ZoneInfo
 
+from utils import get_output_base
 
 # =============================================================================
 # CONFIGURATION
@@ -58,8 +60,6 @@ from zoneinfo import ZoneInfo
 START_DATE = date(2005, 1, 1)
 YEARS_AHEAD = 2
 EASTERN = ZoneInfo("America/New_York")
-# Default to project's output/ directory (relative to script location)
-DEFAULT_OUTPUT_BASE = Path(__file__).parent.parent / "output"
 DIMDATEGROUPID_NAME = "dimdategroupid.csv"
 
 # Holiday code -> date_group_id label (Julia direct_map). Uppercased on output.
@@ -350,8 +350,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory (dimension_tables and logs under it)",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     args = ap.parse_args()
 
@@ -387,10 +387,17 @@ def main() -> None:
 
     dim_dir.mkdir(parents=True, exist_ok=True)
     out_path = dim_dir / DIMDATEGROUPID_NAME
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     try:
-        df.to_csv(out_path, index=False)
+        df.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, out_path)
         logger.info(f"Wrote {out_path} ({len(df):,} rows, {len(df.columns)} columns)")
     except Exception as e:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
         logger.error(f"Failed to write {out_path}: {e}")
         sys.exit(1)
 

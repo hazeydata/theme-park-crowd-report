@@ -23,7 +23,7 @@ See [README.md](../README.md#scheduling) for details.
 
 ### `run_dimension_fetches.ps1`
 
-Runs the dimension-table fetch scripts and builds in sequence: `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, `build_dimseason.py` (metatable from S3; dimdategroupid and dimseason built locally). Writes to **output/** under the project root (`output/dimension_tables/`, `output/logs/`) via `--output-base`. Invoked by **ThemeParkDimensionFetch_6am**; can also be run manually:
+Runs the dimension-table fetch scripts and builds in sequence: `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, `build_dimseason.py` (metatable from S3; dimdategroupid and dimseason built locally). Writes to the same **output_base** as the ETL (from `config/config.json` or default): `dimension_tables/` and `logs/` under that path. Invoked by **ThemeParkDimensionFetch_6am**; can also be run manually:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_dimension_fetches.ps1
@@ -45,7 +45,7 @@ Exits with an error if any script fails.
   python src/get_wait_times_from_queue_times.py --interval 600
   ```
 
-**`run_queue_times_loop.ps1`** is a thin wrapper that runs the fetcher with `--interval 600` (10 minutes) by default. You can run it in a console or register a Windows task “At log on” / “At startup” to keep it running across reboots.
+**`run_queue_times_loop.ps1`** is a thin wrapper that runs the fetcher with `--interval 600` (10 minutes) by default. It uses the same **output_base** as the rest of the pipeline (from `config/config.json` or default) unless you pass `-OutputBase`. You can run it in a console or register a Windows task “At log on” / “At startup” to keep it running across reboots.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1

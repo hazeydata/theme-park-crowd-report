@@ -32,8 +32,7 @@ theme-park-crowd-report/
 │
 ├── config/                            # Configuration files
 │   ├── README.md
-│   ├── config.example.json           # Example configuration template
-│   └── README.md
+│   └── config.example.json           # Template; copy to config.json (gitignored) and set output_base
 │
 ├── data/                              # Data directories (gitignored)
 │   ├── README.md
@@ -46,10 +45,7 @@ theme-park-crowd-report/
 ├── temp/                              # Temporary files directory (gitignored)
 │   └── README.md
 │
-├── output/                            # Final output files directory (gitignored)
-│   └── README.md
-│
-├── logs/                              # Log files directory (gitignored)
+├── output/                            # Optional dev output (gitignored); production uses output_base from config
 │   └── README.md
 │
 ├── venv/                              # Python virtual environment (gitignored)
@@ -155,27 +151,24 @@ Temporary files directory. Can be cleaned up between runs.
 
 **Why**: Provides a dedicated space for truly temporary files.
 
-### `output/` - Output Directory
+### `output/` - Optional Dev Output
 
-**Note**: The **6 AM dimension fetch** (`run_dimension_fetches.ps1`) writes to `output/`: `output/dimension_tables/`, `output/logs/`. The wait-time ETL uses a configurable output base (default: Dropbox) unless `--output-base` points here.
+**Note**: Production runs use a single **output_base** from `config/config.json` (typically Dropbox). The 5am/7am ETL, 6am dimension fetch, and queue-times fetcher all write to that output_base. The `output/` folder here is for **local dev only** (e.g. `--output-base=./output`). It is gitignored.
 
-The output structure under an output base (e.g. `output/` or Dropbox) is:
+The output structure under an output_base is:
 ```
 output_base/
 ├── fact_tables/clean/YYYY-MM/    # CSV files by park and date
 ├── dimension_tables/             # dimentity, dimparkhours, dimeventdays, dimevents, dimmetatable, dimdategroupid, dimseason
 ├── samples/YYYY-MM/              # Sample CSV files
 ├── state/                        # dedupe.sqlite, processed_files.json, failed_files.json, processing.lock
-└── logs/                         # wait-time ETL, entity, park hours, events, metatable, build_dimdategroupid, build_dimseason
+├── staging/queue_times/          # Queue-times fetcher staging (merged by morning ETL)
+├── validation/                   # validate_wait_times.py JSON reports
+├── reports/                      # report_wait_time_db.py Markdown
+└── logs/                         # All pipeline logs (ETL, dimension scripts, queue-times)
 ```
 
-**Why separate from code**: Keeps data separate from source code, makes it easier to manage large datasets.
-
-### `logs/` - Application Logs
-
-Processing logs, error logs, and debug information. Each run creates a timestamped log file.
-
-**Why**: Essential for monitoring scheduled jobs and debugging issues.
+**Why separate from code**: Keeps data separate from source code; one output_base gives one `logs/` and one set of dimension_tables.
 
 ## File Organization Principles
 
@@ -199,7 +192,7 @@ from utils import get_wait_time_filetype
 
 ## Usage Notes
 
-- All data directories (`data/`, `work/`, `temp/`, `output/`, `logs/`) are gitignored
+- Data and output directories (`data/`, `work/`, `temp/`, `output/`) are gitignored; logs live under `output_base/logs/` and are not in the repo
 - README files in these directories are tracked to document their purpose
 - The `src/` directory is a Python package - modules can be imported
 - Scripts should be run from the project root directory

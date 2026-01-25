@@ -78,6 +78,7 @@ from get_tp_wait_time_data_from_s3 import (
     setup_logging,
     write_grouped_csvs,
 )
+from utils import get_output_base
 
 # =============================================================================
 # CONFIGURATION CONSTANTS
@@ -86,9 +87,6 @@ from get_tp_wait_time_data_from_s3 import (
 QUEUE_TIMES_BASE_URL = "https://queue-times.com"
 PARKS_ENDPOINT = f"{QUEUE_TIMES_BASE_URL}/parks.json"
 QUEUE_TIMES_ENDPOINT_FMT = f"{QUEUE_TIMES_BASE_URL}/parks/{{park_id}}/queue_times.json"
-
-# Default output base (project output/ directory)
-DEFAULT_OUTPUT_BASE = Path(__file__).parent.parent / "output"
 
 # State and output file names
 DEDUPE_DB_NAME = "dedupe_queue_times.sqlite"
@@ -525,8 +523,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     ap.add_argument(
         "--park-ids",

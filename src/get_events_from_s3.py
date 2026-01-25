@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import sys
 import time
 from datetime import datetime
@@ -55,6 +56,7 @@ import pandas as pd
 from botocore.config import Config
 from botocore.exceptions import ClientError, ResponseStreamingError
 
+from utils import get_output_base
 
 # =============================================================================
 # CONFIGURATION
@@ -70,9 +72,6 @@ EVENT_FILES = [
     ("current_events.csv", "dimevents.csv"),
 ]
 
-DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
-)
 MAX_RETRIES = 3
 RETRY_WAIT = [1, 2, 4]
 
@@ -139,8 +138,8 @@ def main() -> None:
     ap.add_argument(
         "--output-base",
         type=Path,
-        default=DEFAULT_OUTPUT_BASE,
-        help="Output base directory (dimension_tables and logs under it)",
+        default=get_output_base(),
+        help="Output base directory (from config/config.json or default)",
     )
     args = ap.parse_args()
 
@@ -186,10 +185,17 @@ def main() -> None:
             failed = True
             continue
         out_path = dim_dir / out_name
+        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
         try:
-            df.to_csv(out_path, index=False)
+            df.to_csv(tmp_path, index=False)
+            os.replace(tmp_path, out_path)
             logger.info(f"Wrote {out_path} ({len(df):,} rows, {len(df.columns)} columns)")
         except Exception as e:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
             logger.error(f"Failed to write {out_path}: {e}")
             failed = True
 

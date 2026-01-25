@@ -21,11 +21,11 @@ theme-park-crowd-report/
 │   ├── parsers/                  # Modular data parsers
 │   │   └── wait_time_parsers.py  # Standby and fastpass parsers
 │   └── utils/                     # Utility functions
-│       └── file_identification.py # File type classifier
-├── config/                        # Configuration files
-├── logs/                          # Processing logs (gitignored)
-├── state/                         # State files (dedupe DB, processed files tracking)
-└── fact_tables/clean/             # Output CSV files (gitignored)
+│       ├── file_identification.py # File type classifier
+│       └── paths.py               # get_output_base (config/config.json)
+├── config/                        # config.example.json; copy to config.json for output_base
+├── output/                        # Optional dev output (gitignored); production uses output_base
+└── ...                           # fact_tables, dimension_tables, state, logs live under output_base
 ```
 
 See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed folder organization.
@@ -54,7 +54,11 @@ pip install -r requirements.txt
 - `pandas`: Data processing
 - `pydantic`: Data validation (if needed)
 
-### 3. Configure AWS Credentials
+### 3. (Optional) Output base
+
+Copy `config/config.example.json` to `config/config.json` and set `output_base` to your pipeline output folder (e.g. your Dropbox path). If you skip this, the default path is used. See [config/README.md](config/README.md).
+
+### 4. Configure AWS Credentials
 
 The script needs AWS credentials to access S3. Configure one of these:
 
@@ -189,7 +193,7 @@ python src/build_dimseason.py --output-base "D:\Custom\Path"
 
 ## Output Structure
 
-The script creates organized CSV files under the output base directory:
+The pipeline writes to a single **output_base** (from `config/config.json` or the default path). The script creates organized CSV files under that directory:
 
 ```
 output_base/
@@ -337,7 +341,7 @@ Three Windows scheduled tasks run **daily**:
 | **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events, metatable from S3; builds dimdategroupid, dimseason → dimension_tables |
 | **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup ETL (e.g. if 5 AM didn’t run or S3 updates were late) |
 
-The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, and `build_dimseason.py` in sequence. It writes to **output/** under the project root (`output/dimension_tables/`, `output/logs/`) and does not use the lock.
+The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, and `build_dimseason.py` in sequence. It writes to the same **output_base** as the ETL (from `config/config.json` or default): `dimension_tables/` and `logs/` under that path. It does not use the lock.
 
 **Register the tasks** (run once, or after changes):
 
@@ -364,7 +368,7 @@ The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\
 
 ### Log Files
 
-Check `logs/` directory for detailed processing logs:
+Check **`output_base/logs/`** for detailed processing logs (output_base from `config/config.json` or the default path):
 - Each run creates a new log file with timestamp
 - Logs include: files processed, rows written, errors encountered
 - Useful for debugging and monitoring
