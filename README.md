@@ -121,6 +121,17 @@ python src/get_entity_table_from_s3.py --output-base "D:\Custom\Path"
 
 **What it does**: Downloads `current_*_entities.csv` from `s3://touringplans_stats/export/entities/` (properties: dlr, tdr, uor, ush, wdw — includes Epic Universe / EU via uor), combines them with a union of columns, normalizes the `land` column, and writes `dimension_tables/dimentity.csv` under the output base. Uses the same S3 bucket and AWS credentials as the wait-time ETL. Adapted from legacy Julia `run_dimEntity.jl`.
 
+### Queue-Times.com (live wait times)
+
+Fetches **live** wait times from the queue-times.com API. The scraper writes to **`staging/queue_times/YYYY-MM/{park}_{date}.csv`** only (not `fact_tables`), so fact_tables stay **static for modelling**. The **morning ETL** (S3 run) merges **yesterday's** staging into `fact_tables/clean` at the start of each run, then deletes those staged files. Staging is also available for **live use** (e.g. Twitch/YouTube). Uses `config/queue_times_entity_mapping.csv`; deduplicates via SQLite.
+
+- **One-shot**: `python src/get_wait_times_from_queue_times.py`
+- **Continuous (constantly runs)**: `--interval SECS` loops fetch → write to staging → sleep:
+  ```powershell
+  python src/get_wait_times_from_queue_times.py --interval 600
+  ```
+  Or: `powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1` (default 10 min). Stop with Ctrl+C. For 24/7, register a Windows task “At log on” that runs `run_queue_times_loop.ps1`.
+
 ### Park hours (dimParkHours)
 
 Fetches park-hours dimension data from S3 and writes a single master table:
@@ -184,10 +195,14 @@ The script creates organized CSV files under the output base directory:
 output_base/
 ├── fact_tables/
 │   └── clean/
-│       └── YYYY-MM/                    # Organized by year-month
+│       └── YYYY-MM/                    # Organized by year-month (S3 ETL + yesterday's queue-times merged at morning run)
 │           ├── mk_2024-01-15.csv       # One file per park per day
 │           ├── epcot_2024-01-15.csv
 │           └── hs_2024-01-16.csv
+├── staging/
+│   └── queue_times/                    # Queue-times scraper output (merged into fact_tables/clean by morning ETL; also for live use)
+│       └── YYYY-MM/
+│           └── {park}_{date}.csv
 ├── dimension_tables/
 │   ├── dimentity.csv                   # Entity table; src/get_entity_table_from_s3.py
 │   ├── dimparkhours.csv                # Park hours; src/get_park_hours_from_s3.py

@@ -2,6 +2,10 @@
 
 This directory contains configuration files and templates for the Theme Park Wait Time Data Pipeline.
 
+## Queue-Times Lookup
+
+**`queue_times_entity_mapping.csv`** — Master lookup from queue-times.com ride IDs to TouringPlans `entity_code`. Used by `src/get_wait_times_from_queue_times.py`. Columns: `entity_code`, `park_code`, `queue_times_id`, `queue_times_name`, `touringplans_name`. Supplemental build scripts and workflow notes live in `temp/` (see `temp/QUEUE_TIMES_MAPPING_README.md`).
+
 ## Current Configuration
 
 The pipeline currently uses command-line arguments for configuration. No configuration files are required.

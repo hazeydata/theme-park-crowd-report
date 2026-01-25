@@ -8,12 +8,13 @@ PURPOSE
 This script is the main ETL (Extract, Transform, Load) pipeline for theme park
 wait time data. It:
 
-  1. READS raw wait time data from AWS S3 (standby wait times + fastpass/priority)
-  2. CLASSIFIES each file by type (Standby, New Fastpass, Old Fastpass)
-  3. PARSES the data using modular parsers (ported from proven Julia logic)
-  4. DEDUPLICATES rows using a persistent SQLite database
-  5. DERIVES park codes and operational dates from the data
-  6. WRITES clean CSV files organized by park and date
+  1. MERGES yesterday's queue-times from staging/queue_times into fact_tables/clean (then deletes staged files)
+  2. READS raw wait time data from AWS S3 (standby wait times + fastpass/priority)
+  3. CLASSIFIES each file by type (Standby, New Fastpass, Old Fastpass)
+  4. PARSES the data using modular parsers (ported from proven Julia logic)
+  5. DEDUPLICATES rows using a persistent SQLite database
+  6. DERIVES park codes and operational dates from the data
+  7. WRITES clean CSV files organized by park and date
 
 ================================================================================
 OUTPUT
@@ -507,6 +508,7 @@ def get_output_directories(output_base: Path) -> Dict[str, Path]:
         "base": output_base,
         "fact_tables": output_base / "fact_tables",
         "fact_tables_clean": output_base / "fact_tables" / "clean",
+        "staging_queue_times": output_base / "staging" / "queue_times",
         "samples": output_base / "samples" / ym,
         "state": output_base / "state",
         "logs": output_base / "logs",
@@ -515,6 +517,49 @@ def get_output_directories(output_base: Path) -> Dict[str, Path]:
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
     return dirs
+
+
+def merge_yesterday_queue_times(dirs: Dict[str, Path], logger: logging.Logger) -> int:
+    """
+    Append yesterday's queue-times from staging/queue_times into fact_tables/clean,
+    then delete the staged files. Uses Eastern date for 'yesterday'.
+    Called at the start of the morning ETL so fact_tables stay static until the
+    daily load; the queue-times scraper writes to staging only.
+    """
+    et = ZoneInfo("America/New_York")
+    yesterday = (datetime.now(et).date() - timedelta(days=1)).strftime("%Y-%m-%d")
+    ym = yesterday[:7]
+    staging_dir = dirs["staging_queue_times"] / ym
+    if not staging_dir.exists():
+        logger.debug(f"Merge queue-times: no staging dir {staging_dir} for yesterday={yesterday}")
+        return 0
+    total = 0
+    pattern = f"*_{yesterday}.csv"
+    for path in sorted(staging_dir.glob(pattern)):
+        try:
+            df = pd.read_csv(path)
+            for c in ["entity_code", "observed_at", "wait_time_type", "wait_time_minutes"]:
+                if c not in df.columns:
+                    logger.warning(f"Merge queue-times: skipping {path.name}, missing column {c}")
+                    break
+            else:
+                park = path.stem.replace(f"_{yesterday}", "")
+                fact_dir = dirs["fact_tables_clean"] / ym
+                fact_dir.mkdir(parents=True, exist_ok=True)
+                fact_path = fact_dir / path.name
+                exists = fact_path.exists()
+                mode, header = ("a", False) if exists else ("w", True)
+                df[["entity_code", "observed_at", "wait_time_type", "wait_time_minutes"]].to_csv(
+                    fact_path, mode=mode, header=header, index=False
+                )
+                total += len(df)
+                logger.info(f"Merged {len(df)} queue-times rows into {fact_path.relative_to(dirs['base'])} (park={park})")
+                path.unlink()
+        except Exception as e:
+            logger.warning(f"Merge queue-times: failed {path.name}: {e}")
+    if total:
+        logger.info(f"Merge queue-times: appended {total} rows for yesterday={yesterday}")
+    return total
 
 
 # =============================================================================
@@ -643,6 +688,9 @@ def main() -> None:
     logger.info(f"Properties: {', '.join(props)}")
     logger.info(f"Full rebuild: {args.full_rebuild}")
     logger.info("=" * 70)
+
+    # ----- STEP 1b: Merge yesterday's queue-times from staging into fact_tables -----
+    merge_yesterday_queue_times(dirs, logger)
 
     # ----- STEP 2: Load state (processed + failed files) -----
     state_file = dirs["state"] / PROCESSED_FILES_JSON

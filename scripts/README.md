@@ -31,6 +31,27 @@ powershell -ExecutionPolicy Bypass -File scripts/run_dimension_fetches.ps1
 
 Exits with an error if any script fails.
 
+### Queue-Times.com fetcher and `run_queue_times_loop.ps1`
+
+**`src/get_wait_times_from_queue_times.py`** fetches live wait times from the queue-times.com API, maps ride IDs to TouringPlans `entity_code` via `config/queue_times_entity_mapping.csv`, deduplicates with SQLite, and **writes to `staging/queue_times/YYYY-MM/{park}_{date}.csv`** (not `fact_tables`). The **morning ETL** (S3 run) merges **yesterday's** staging into `fact_tables/clean` at the start of each run. Staging is also used for live content (e.g. Twitch/YouTube).
+
+- **One-shot** (single fetch and write to staging):
+  ```powershell
+  python src/get_wait_times_from_queue_times.py
+  python src/get_wait_times_from_queue_times.py --output-base "D:\Path\output" --park-ids 6,5,7,8
+  ```
+- **Continuous (constantly runs)**: `--interval SECS` runs a loop: fetch → write to staging → sleep → repeat. Stop with Ctrl+C.
+  ```powershell
+  python src/get_wait_times_from_queue_times.py --interval 600
+  ```
+
+**`run_queue_times_loop.ps1`** is a thin wrapper that runs the fetcher with `--interval 600` (10 minutes) by default. You can run it in a console or register a Windows task “At log on” / “At startup” to keep it running across reboots.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -IntervalSeconds 900 -OutputBase "D:\Path\output"
+```
+
 ### `validate_wait_times.py`
 
 Validates wait time fact table CSVs under `fact_tables/clean/`:
