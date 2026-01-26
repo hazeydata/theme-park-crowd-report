@@ -45,12 +45,14 @@ Exits with an error if any script fails.
   python src/get_wait_times_from_queue_times.py --interval 600
   ```
 
-**`run_queue_times_loop.ps1`** is a thin wrapper that runs the fetcher with `--interval 600` (10 minutes) by default. It uses the same **output_base** as the rest of the pipeline (from `config/config.json` or default) unless you pass `-OutputBase`. You can run it in a console or register a Windows task “At log on” / “At startup” to keep it running across reboots.
+**`run_queue_times_loop.ps1`** is a thin wrapper that runs the fetcher with `--interval 300` (5 minutes) by default. It uses the same **output_base** as the rest of the pipeline (from `config/config.json` or default) unless you pass `-OutputBase`. You can run it in a console or register a Windows task “At log on” / “At startup” to keep it running across reboots. The fetcher uses **dimparkhours** (`opening_time` / `closing_time` when present) to only scrape parks in-window (open−90 to close+90 in park TZ); use `--no-hours-filter` to disable. The fetcher always bypasses HTTP/HTTPS proxy; run the loop from **PowerShell or Command Prompt** (not Cursor's terminal) if your IDE forces a local proxy.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1
-powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -IntervalSeconds 900 -OutputBase "D:\Path\output"
+powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -IntervalSeconds 300 -OutputBase "D:\Path\output"
 ```
+
+**Troubleshooting:** If the loop was stopped by closing the window, delete `state/processing_queue_times.lock` under your output base before starting again. Check `output_base/logs/get_tp_wait_time_data_*.log` for errors.
 
 ### `validate_wait_times.py`
 

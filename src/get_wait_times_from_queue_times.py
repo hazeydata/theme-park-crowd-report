@@ -240,9 +240,9 @@ def get_in_window_park_ids(
     """
     date_col = _first_column(dimparkhours, ["park_date", "date"])
     park_col = _first_column(dimparkhours, ["park", "park_code", "code"])
-    open_col = _first_column(dimparkhours, ["open", "open_time", "open_time_1"])
-    close_col = _first_column(dimparkhours, ["close", "close_time", "close_time_1"])
-    emh_col = _first_column(dimparkhours, ["emh_open", "early_entry", "early_entry_open", "extra_magic_hours", "emh"])
+    open_col = _first_column(dimparkhours, ["opening_time", "open", "open_time", "open_time_1"])
+    close_col = _first_column(dimparkhours, ["closing_time", "close", "close_time", "close_time_1"])
+    emh_col = _first_column(dimparkhours, ["opening_time_with_emh", "emh_open", "early_entry", "early_entry_open", "extra_magic_hours", "emh"])
 
     if not date_col or not park_col or not open_col or not close_col:
         logger.warning(
@@ -358,13 +358,24 @@ def load_entity_table(output_base: Path) -> Optional[pd.DataFrame]:
 # API FETCHING
 # =============================================================================
 
-def fetch_with_retry(url: str, logger: logging.Logger, max_retries: int = REQUEST_RETRIES) -> Optional[dict]:
-    """Fetch JSON from URL with retries."""
+def fetch_with_retry(
+    url: str,
+    logger: logging.Logger,
+    max_retries: int = REQUEST_RETRIES,
+    proxies: Optional[dict] = None,
+) -> Optional[dict]:
+    """Fetch JSON from URL with retries. Use proxies={\"http\": None, \"https\": None} to bypass env proxy."""
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+            kwargs: dict = {"timeout": REQUEST_TIMEOUT}
+            if proxies is not None:
+                kwargs["proxies"] = proxies
+            response = requests.get(url, **kwargs)
             response.raise_for_status()
             return response.json()
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON from {url}: {e}")
+            return None
         except requests.exceptions.RequestException as e:
             if attempt < max_retries - 1:
                 wait_time = REQUEST_RETRY_DELAY * (attempt + 1)
@@ -376,10 +387,10 @@ def fetch_with_retry(url: str, logger: logging.Logger, max_retries: int = REQUES
     return None
 
 
-def fetch_parks(logger: logging.Logger) -> Optional[List[dict]]:
+def fetch_parks(logger: logging.Logger, proxies: Optional[dict] = None) -> Optional[List[dict]]:
     """Fetch park list from queue-times.com."""
     logger.info(f"Fetching parks from {PARKS_ENDPOINT}")
-    data = fetch_with_retry(PARKS_ENDPOINT, logger)
+    data = fetch_with_retry(PARKS_ENDPOINT, logger, proxies=proxies)
     if data is None:
         return None
     
@@ -396,11 +407,11 @@ def fetch_parks(logger: logging.Logger) -> Optional[List[dict]]:
     return all_parks
 
 
-def fetch_park_wait_times(park_id: int, logger: logging.Logger) -> Optional[dict]:
+def fetch_park_wait_times(park_id: int, logger: logging.Logger, proxies: Optional[dict] = None) -> Optional[dict]:
     """Fetch wait times for a specific park."""
     url = QUEUE_TIMES_ENDPOINT_FMT.format(park_id=park_id)
     logger.debug(f"Fetching wait times for park {park_id} from {url}")
-    return fetch_with_retry(url, logger)
+    return fetch_with_retry(url, logger, proxies=proxies)
 
 
 # =============================================================================
@@ -549,7 +560,7 @@ def transform_queue_times_data(
         
         # Audit: log when observed_at is much older than fetch time (API returning stale last_updated)
         if fetch_time_utc is not None:
-            fetch_ts = pd.Timestamp(fetch_time_utc, tz="UTC")
+            fetch_ts = pd.Timestamp(fetch_time_utc)
             age_hours = (fetch_ts - observed_at_utc).total_seconds() / 3600
             if age_hours > STALE_OBSERVED_AT_THRESHOLD_HOURS:
                 stale_examples.append((entity_code, observed_at_str, age_hours, int(wait_time)))
@@ -594,6 +605,9 @@ def process_queue_times(
     """
     Main processing function: fetch and process queue-times.com data.
     
+    Always bypasses HTTP/HTTPS proxy (proxies={}) so the fetcher runs reliably in
+    Cursor, scheduled tasks, and environments with broken or missing proxy config.
+    
     Args:
         output_base: Base output directory
         park_ids: Optional list of park IDs to process. If None, processes all parks.
@@ -603,6 +617,7 @@ def process_queue_times(
     Returns:
         Total number of rows written
     """
+    proxies = {}  # always bypass env proxy so we can run everywhere (Cursor, tasks, etc.)
     if logger is None:
         logger = setup_logging(output_base / "logs")
     
@@ -630,7 +645,7 @@ def process_queue_times(
             logger.warning("No queue-times mapping table found. Will use fallback ID generation.")
         
         # Fetch parks
-        parks = fetch_parks(logger)
+        parks = fetch_parks(logger, proxies=proxies)
         if parks is None:
             logger.error("Failed to fetch parks list")
             return 0
@@ -654,60 +669,63 @@ def process_queue_times(
             parks = [p for p in parks if p.get("id") in park_ids]
             logger.info(f"Filtered to {len(parks)} requested parks")
         
-        # Process each park
+        # Process each park (wrap in try/except so one bad park doesn't kill the run)
         total_rows = 0
         for park in parks:
-            park_id = park.get("id")
-            park_name = park.get("name", f"Park {park_id}")
-            
-            if park_id is None:
-                logger.warning(f"Skipping park without ID: {park_name}")
-                continue
-            
-            # Check if we have a mapping for this park
-            if park_id not in QUEUE_TIMES_PARK_MAP:
-                logger.debug(f"Skipping park {park_name} (id={park_id}) - no park code mapping")
-                continue
-            
-            park_code = QUEUE_TIMES_PARK_MAP[park_id]
-            park_tz_str = park.get("timezone", "UTC")
-            
             try:
-                park_tz = ZoneInfo(park_tz_str)
+                park_id = park.get("id")
+                park_name = park.get("name", f"Park {park_id}")
+                
+                if park_id is None:
+                    logger.warning(f"Skipping park without ID: {park_name}")
+                    continue
+                
+                # Check if we have a mapping for this park
+                if park_id not in QUEUE_TIMES_PARK_MAP:
+                    logger.debug(f"Skipping park {park_name} (id={park_id}) - no park code mapping")
+                    continue
+                
+                park_code = QUEUE_TIMES_PARK_MAP[park_id]
+                park_tz_str = park.get("timezone", "UTC")
+                
+                try:
+                    park_tz = ZoneInfo(park_tz_str)
+                except Exception as e:
+                    logger.warning(f"Invalid timezone {park_tz_str} for park {park_name}: {e}. Using UTC.")
+                    park_tz = ZoneInfo("UTC")
+                
+                # Fetch wait times
+                queue_times_data = fetch_park_wait_times(park_id, logger, proxies=proxies)
+                if queue_times_data is None:
+                    logger.warning(f"Failed to fetch wait times for park {park_name} (id={park_id})")
+                    continue
+                fetch_time_utc = datetime.now(ZoneInfo("UTC"))
+                
+                # Transform data (pass fetch_time_utc to audit stale observed_at from queue-times last_updated)
+                df = transform_queue_times_data(
+                    park_id, park_name, queue_times_data, park_tz, queue_times_mapping, logger,
+                    fetch_time_utc=fetch_time_utc,
+                )
+                
+                if df.empty:
+                    logger.info(f"No wait time data for park {park_name} (id={park_id})")
+                    continue
+                
+                # Deduplicate
+                new_mask = insert_new_mask(conn, df)
+                new_df = df[new_mask]
+                
+                if new_df.empty:
+                    logger.info(f"All {len(df)} rows for park {park_name} were duplicates")
+                    continue
+                
+                logger.info(f"Processing {len(new_df)} new rows for park {park_name} (id={park_id})")
+                
+                # Write to staging (morning ETL merges yesterday's staging into fact_tables)
+                rows_written = write_grouped_csvs(new_df, dirs["staging_queue_times"], park_tz, logger)
+                total_rows += rows_written
             except Exception as e:
-                logger.warning(f"Invalid timezone {park_tz_str} for park {park_name}: {e}. Using UTC.")
-                park_tz = ZoneInfo("UTC")
-            
-            # Fetch wait times
-            queue_times_data = fetch_park_wait_times(park_id, logger)
-            if queue_times_data is None:
-                logger.warning(f"Failed to fetch wait times for park {park_name} (id={park_id})")
-                continue
-            fetch_time_utc = datetime.now(ZoneInfo("UTC"))
-            
-            # Transform data (pass fetch_time_utc to audit stale observed_at from queue-times last_updated)
-            df = transform_queue_times_data(
-                park_id, park_name, queue_times_data, park_tz, queue_times_mapping, logger,
-                fetch_time_utc=fetch_time_utc,
-            )
-            
-            if df.empty:
-                logger.info(f"No wait time data for park {park_name} (id={park_id})")
-                continue
-            
-            # Deduplicate
-            new_mask = insert_new_mask(conn, df)
-            new_df = df[new_mask]
-            
-            if new_df.empty:
-                logger.info(f"All {len(df)} rows for park {park_name} were duplicates")
-                continue
-            
-            logger.info(f"Processing {len(new_df)} new rows for park {park_name} (id={park_id})")
-            
-            # Write to staging (morning ETL merges yesterday's staging into fact_tables)
-            rows_written = write_grouped_csvs(new_df, dirs["staging_queue_times"], park_tz, logger)
-            total_rows += rows_written
+                logger.exception(f"Error processing park {park.get('name', park.get('id', '?'))} (id={park.get('id')}): {e}")
         
         logger.info(f"Total rows written: {total_rows}")
         return total_rows
@@ -779,7 +797,11 @@ def main() -> None:
     use_hours_filter = not args.no_hours_filter
 
     def run_once() -> int:
-        return process_queue_times(output_base, park_ids, use_hours_filter=use_hours_filter, logger=logger)
+        return process_queue_times(
+            output_base, park_ids,
+            use_hours_filter=use_hours_filter,
+            logger=logger,
+        )
 
     if args.interval:
         logger.info(f"Continuous mode: interval={args.interval}s. Ctrl+C to stop.")
@@ -788,11 +810,14 @@ def main() -> None:
             while True:
                 run += 1
                 logger.info(f"--- Run #{run} ---")
-                total_rows = run_once()
-                if total_rows > 0:
-                    logger.info(f"Wrote {total_rows} rows to staging/queue_times")
-                else:
-                    logger.info("No new rows this run")
+                try:
+                    total_rows = run_once()
+                    if total_rows > 0:
+                        logger.info(f"Wrote {total_rows} rows to staging/queue_times")
+                    else:
+                        logger.info("No new rows this run")
+                except Exception as e:
+                    logger.exception(f"Run #{run} failed: {e}")
                 logger.info(f"Sleeping {args.interval}s...")
                 time.sleep(args.interval)
         except KeyboardInterrupt:

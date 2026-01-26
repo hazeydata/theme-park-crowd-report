@@ -4,6 +4,17 @@ This document tracks significant changes to the Theme Park Wait Time Data Pipeli
 
 ## Recent Changes
 
+### Queue-Times scraper fixes (hours filter, robustness)
+
+**Changed**:
+- **dimparkhours column names**: The fetcher now looks for `opening_time`, `closing_time`, and `opening_time_with_emh` (in addition to `open`/`close`/`emh_open` etc.) when filtering parks by in-window hours. This matches the raw S3 dimparkhours layout and removes the “missing required columns” fallback when those columns exist.
+- **`pd.Timestamp` / tz fix**: Replaced `pd.Timestamp(fetch_time_utc, tz="UTC")` with `pd.Timestamp(fetch_time_utc)` in the stale-`observed_at` audit. Pandas raises when the input is already timezone-aware and `tz=` is passed; the fetcher always passes UTC-aware datetimes.
+- **Robustness**: JSON decode errors from the API are caught and logged instead of crashing. Per-park processing is wrapped in try/except so one bad park does not stop the run. The interval loop catches run failures, logs them, and continues (sleep then retry).
+- **Proxy**: The fetcher always uses `proxies={}` so it runs in scheduled tasks, normal terminals, and environments with broken or missing proxy config.
+- **Docs**: `scripts/README.md` documents the 5‑minute loop, proxy behaviour, and troubleshooting (lock file). Main `README` queue-times section updated to mention the 5‑min loop default.
+
+**Why**: Restore reliable scraping after regressions; align with dimparkhours schema; improve resilience to API glitches and per-park errors.
+
 ### Metatable (dimMetatable) and Season (dimSeason)
 
 **Added**:

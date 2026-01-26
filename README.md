@@ -137,9 +137,9 @@ Fetches **live** wait times from the queue-times.com API. The scraper writes to 
 - **One-shot**: `python src/get_wait_times_from_queue_times.py`
 - **Continuous (constantly runs)**: `--interval SECS` loops fetch → write to staging → sleep:
   ```powershell
-  python src/get_wait_times_from_queue_times.py --interval 600
+  python src/get_wait_times_from_queue_times.py --interval 300
   ```
-  Or: `powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1` (default 10 min). Stop with Ctrl+C. For 24/7, register a Windows task “At log on” that runs `run_queue_times_loop.ps1`.
+  Or: `powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1` (default 5 min). Stop with Ctrl+C. For 24/7, register a Windows task “At log on” that runs `run_queue_times_loop.ps1`. Run from **PowerShell or Command Prompt** (not Cursor’s terminal) if your IDE forces a local proxy. If the loop was stopped by closing the window, delete `state/processing_queue_times.lock` under your output base before starting again.
 
 ### Park hours (dimParkHours)
 
