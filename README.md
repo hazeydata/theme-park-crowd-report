@@ -379,6 +379,7 @@ Three Windows scheduled tasks run **daily**:
 | Task | Time | Purpose |
 |------|------|---------|
 | **ThemeParkWaitTimeETL_5am** | 5:00 AM Eastern | Primary wait-time ETL run |
+| **ThemeParkWaitTimeReport_530am** | 5:30 AM Eastern | Wait-time DB report (generates `reports/wait_time_db_report.md` with `--quick`) |
 | **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events, metatable from S3; builds dimdategroupid, dimseason → dimension_tables |
 | **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup ETL (e.g. if 5 AM didn’t run or S3 updates were late) |
 
