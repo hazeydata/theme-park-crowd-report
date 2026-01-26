@@ -13,6 +13,7 @@ This pipeline:
 6. **Writes clean CSV files** organized by park and date: `fact_tables/clean/YYYY-MM/{park}_{YYYY-MM-DD}.csv`
 
 **Fact table schema** (columns, `observed_at`, `wait_time_type`, sources): [docs/SCHEMA.md](docs/SCHEMA.md).  
+**Entity metadata index** (efficient modeling workflows, selective entity loading): [docs/ENTITY_INDEX.md](docs/ENTITY_INDEX.md).  
 **Legacy pipeline (attraction-io) alignment** and next steps: [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md).  
 **Critical review** of the legacy pipeline (efficiency, workflow, quality) and how we improve: [docs/LEGACY_PIPELINE_CRITICAL_REVIEW.md](docs/LEGACY_PIPELINE_CRITICAL_REVIEW.md).  
 **Modeling and WTI methodology** (ACTUAL curves, forecast, live inference, Wait Time Index): [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).
@@ -418,6 +419,7 @@ Check **`output_base/logs/`** for detailed processing logs (output_base from `co
 - **`state/processed_files.json`**: Lists all successfully processed S3 files (key → last_modified)
 - **`state/failed_files.json`**: Tracks files that failed (parse/connection errors). Old, repeatedly-failed files are skipped.
 - **`state/dedupe.sqlite`**: Deduplication database (grows over time)
+- **`state/entity_index.sqlite`**: Entity metadata index (latest observation dates, timestamps, row counts per entity)
 - **`state/processing.lock`**: Prevents multiple instances from running at once
 
 **Why track state**: Enables incremental processing, prevents duplicate work, and avoids retrying files that cannot be parsed.

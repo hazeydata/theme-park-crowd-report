@@ -36,6 +36,12 @@
 
 ---
 
+## Entity Metadata Index (DONE)
+
+**Implemented**: Entity metadata index (`state/entity_index.sqlite`) tracks per-entity metadata (latest observation date, latest timestamp, row counts, last modeled timestamp) to enable efficient modeling workflows. Updates incrementally when ETL writes new CSVs. Provides functions to query entities needing re-modeling and load entity data selectively (only reads relevant park's CSVs). See [docs/ENTITY_INDEX.md](docs/ENTITY_INDEX.md). Scripts: [src/build_entity_index.py](src/build_entity_index.py) (build/rebuild from all CSVs), [scripts/inspect_entity_index.py](scripts/inspect_entity_index.py) (query and inspect).
+
+---
+
 ## Next Steps (from attraction-io alignment)
 
 See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the legacy pipeline summary and full mapping. For modeling, ACTUAL curves, forecast, live inference, and WTI: [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).

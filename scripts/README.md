@@ -111,6 +111,46 @@ python scripts/report_queue_times_unmapped.py --output-base "D:\Path" --report r
 
 **Options**: `--output-base`, `--report` (default: `output_base/reports/queue_times_unmapped.csv`).
 
+### `build_entity_index.py`
+
+**Location**: `src/build_entity_index.py` (not in scripts/, but a utility script)
+
+Builds or rebuilds the **entity metadata index** (`state/entity_index.sqlite`) by scanning all fact table CSVs in `fact_tables/clean/`. The index tracks per-entity metadata (latest observation date, latest timestamp, row counts) to enable efficient modeling workflows. Useful for initial index creation or rebuilding after corruption.
+
+**Run**:
+
+```powershell
+# Build index from all CSVs
+python src/build_entity_index.py
+
+# Rebuild (delete existing and start fresh)
+python src/build_entity_index.py --rebuild
+
+# Custom output base
+python src/build_entity_index.py --output-base "D:\Path"
+```
+
+**Note**: The index updates automatically during ETL runs, so a full rebuild is only needed for initial creation or recovery. See [docs/ENTITY_INDEX.md](../docs/ENTITY_INDEX.md).
+
+### `inspect_entity_index.py`
+
+Inspects the entity metadata index to show entities, their latest observations, and which ones need re-modeling.
+
+**Run**:
+
+```powershell
+# Show all entities (first 20)
+python scripts/inspect_entity_index.py
+
+# Show entities needing modeling
+python scripts/inspect_entity_index.py --needing-modeling
+
+# Custom limit
+python scripts/inspect_entity_index.py --limit 50
+```
+
+**Options**: `--output-base`, `--needing-modeling` (show only entities needing re-modeling), `--limit` (default: 20).
+
 ## Potential Future Scripts
 
 Examples of scripts that might go here:

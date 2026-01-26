@@ -56,7 +56,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Set, Optional
 
 import boto3
 import pandas as pd
@@ -449,8 +449,18 @@ def derive_park_date(observed_at: pd.Series, tz: ZoneInfo) -> pd.Series:
 # =============================================================================
 # Writes one CSV per (park, park_date). Appends if file exists.
 
-def write_grouped_csvs(df: pd.DataFrame, clean_dir: Path, tz: ZoneInfo, logger: logging.Logger) -> int:
-    """Write DataFrame to CSVs grouped by (park, park_date). Returns total rows written."""
+def write_grouped_csvs(
+    df: pd.DataFrame, 
+    clean_dir: Path, 
+    tz: ZoneInfo, 
+    logger: logging.Logger,
+    entity_index_db: Optional[Path] = None,
+) -> int:
+    """
+    Write DataFrame to CSVs grouped by (park, park_date). Returns total rows written.
+    
+    Optionally updates entity metadata index if entity_index_db is provided.
+    """
     if df.empty:
         return 0
     df = df.copy()
@@ -480,6 +490,16 @@ def write_grouped_csvs(df: pd.DataFrame, clean_dir: Path, tz: ZoneInfo, logger: 
         total += len(out)
         action = "Appended" if exists else "Wrote"
         logger.info(f"{action} {len(out)} rows to {path} (park={park}, date={park_date})")
+    
+    # Update entity index if requested (after all CSVs written)
+    if entity_index_db is not None and total > 0:
+        try:
+            from processors.entity_index import update_index_from_dataframe
+            # Use the original df with park_date already derived
+            update_index_from_dataframe(df[out_cols + ["park_date"]], entity_index_db, logger)
+        except Exception as e:
+            logger.warning(f"Failed to update entity index: {e}")
+    
     return total
 
 
@@ -516,12 +536,18 @@ def get_output_directories(output_base: Path) -> Dict[str, Path]:
     return dirs
 
 
-def merge_yesterday_queue_times(dirs: Dict[str, Path], logger: logging.Logger) -> int:
+def merge_yesterday_queue_times(
+    dirs: Dict[str, Path], 
+    logger: logging.Logger,
+    entity_index_db: Optional[Path] = None,
+) -> int:
     """
     Append yesterday's queue-times from staging/queue_times into fact_tables/clean,
     then delete the staged files. Uses Eastern date for 'yesterday'.
     Called at the start of the morning ETL so fact_tables stay static until the
     daily load; the queue-times scraper writes to staging only.
+    
+    Optionally updates entity metadata index if entity_index_db is provided.
     """
     et = ZoneInfo("America/New_York")
     yesterday = (datetime.now(et).date() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -531,7 +557,10 @@ def merge_yesterday_queue_times(dirs: Dict[str, Path], logger: logging.Logger) -
         logger.debug(f"Merge queue-times: no staging dir {staging_dir} for yesterday={yesterday}")
         return 0
     total = 0
+    all_merged_dfs: List[pd.DataFrame] = []  # Collect for index update
     pattern = f"*_{yesterday}.csv"
+    et_tz = ZoneInfo("America/New_York")
+    
     for path in sorted(staging_dir.glob(pattern)):
         try:
             df = pd.read_csv(path)
@@ -546,14 +575,30 @@ def merge_yesterday_queue_times(dirs: Dict[str, Path], logger: logging.Logger) -
                 fact_path = fact_dir / path.name
                 exists = fact_path.exists()
                 mode, header = ("a", False) if exists else ("w", True)
+                
+                # Derive park_date for index update
+                df_with_date = df.copy()
+                df_with_date["park_date"] = derive_park_date(df_with_date["observed_at"], et_tz)
+                
                 df[["entity_code", "observed_at", "wait_time_type", "wait_time_minutes"]].to_csv(
                     fact_path, mode=mode, header=header, index=False
                 )
                 total += len(df)
+                all_merged_dfs.append(df_with_date[["entity_code", "observed_at", "park_date"]])
                 logger.info(f"Merged {len(df)} queue-times rows into {fact_path.relative_to(dirs['base'])} (park={park})")
                 path.unlink()
         except Exception as e:
             logger.warning(f"Merge queue-times: failed {path.name}: {e}")
+    
+    # Update entity index if requested
+    if entity_index_db is not None and all_merged_dfs:
+        try:
+            from processors.entity_index import update_index_from_dataframe
+            merged_df = pd.concat(all_merged_dfs, ignore_index=True)
+            update_index_from_dataframe(merged_df, entity_index_db, logger)
+        except Exception as e:
+            logger.warning(f"Failed to update entity index after merge: {e}")
+    
     if total:
         logger.info(f"Merge queue-times: appended {total} rows for yesterday={yesterday}")
     return total
@@ -576,6 +621,7 @@ def process_file(
     reservoir: List[pd.Series],
     seen: int,
     sample_k: int,
+    entity_index_db: Optional[Path] = None,
 ) -> Tuple[int, int]:
     """Process one S3 file. Returns (rows_written, rows_seen). Raises on failure."""
     rows_written = 0
@@ -617,7 +663,7 @@ def process_file(
                 if new_df.empty:
                     continue
                 rows_seen += len(df)
-                chunk_written = write_grouped_csvs(new_df, clean_dir, tz, logger)
+                chunk_written = write_grouped_csvs(new_df, clean_dir, tz, logger, entity_index_db=entity_index_db)
                 rows_written += chunk_written
                 for _, r in new_df.iterrows():
                     reservoir_update(reservoir, r, sample_k, seen)
@@ -644,7 +690,7 @@ def process_file(
                 if new_df.empty:
                     continue
                 rows_seen += len(out)
-                chunk_written = write_grouped_csvs(new_df, clean_dir, tz, logger)
+                chunk_written = write_grouped_csvs(new_df, clean_dir, tz, logger, entity_index_db=entity_index_db)
                 rows_written += chunk_written
                 for _, r in new_df.iterrows():
                     reservoir_update(reservoir, r, sample_k, seen)
@@ -687,7 +733,8 @@ def main() -> None:
     logger.info("=" * 70)
 
     # ----- STEP 1b: Merge yesterday's queue-times from staging into fact_tables -----
-    merge_yesterday_queue_times(dirs, logger)
+    entity_index_db = dirs["state"] / "entity_index.sqlite"
+    merge_yesterday_queue_times(dirs, logger, entity_index_db=entity_index_db)
 
     # ----- STEP 2: Load state (processed + failed files) -----
     state_file = dirs["state"] / PROCESSED_FILES_JSON
@@ -823,6 +870,7 @@ def main() -> None:
                     reservoir=reservoir,
                     seen=seen,
                     sample_k=args.sample_k,
+                    entity_index_db=entity_index_db,
                 )
                 kept_rows += rows_written
                 seen += rows_seen
