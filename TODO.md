@@ -55,4 +55,12 @@ See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the l
 
 ---
 
+## Tomorrow: Verify wait_time_db_report.md auto-update
+
+**Check**: After the scheduled task runs (ThemeParkWaitTimeReport_530am at 5:30 AM), verify that `reports/wait_time_db_report.md` was updated with today's date. The report should show the latest data including any new park-date CSVs from the 5am ETL run.
+
+**If not updated**: Check Task Scheduler to see if the task ran successfully, check logs for errors.
+
+---
+
 *Add new items below as needed.*
