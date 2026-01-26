@@ -55,6 +55,23 @@ Register-ScheduledTask `
     -Force
 Write-Host "Registered: ThemeParkDimensionFetch_6am (Daily 6:00 AM)"
 
+# Queue-Times.com scraper: run every 5 minutes via a loop (started at log on). Uses dimparkhours
+# to only call the API when a park is in-window (open-90 to close+90 in park TZ).
+$QtScript = Join-Path $ProjectRoot "scripts\run_queue_times_loop.ps1"
+$QtAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-ExecutionPolicy Bypass -NoProfile -File `"$QtScript`" -IntervalSeconds 300" `
+    -WorkingDirectory $ProjectRoot
+$QtTrigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask `
+    -TaskName "ThemeParkQueueTimes_5min" `
+    -Action $QtAction `
+    -Trigger $QtTrigger `
+    -Settings $Settings `
+    -Description "Queue-Times.com scraper - loop every 5 min when parks in-window (open-90 to close+90). Start at log on; stop with Ctrl+C or task kill." `
+    -Force
+Write-Host "Registered: ThemeParkQueueTimes_5min (At log on, interval 300s)"
+
 Write-Host ""
 Write-Host "Done. Tasks use local time; set system time zone to Eastern for 5/6/7 AM ET."
 Write-Host "View in Task Scheduler: taskschd.msc -> Task Scheduler Library"

@@ -1,17 +1,18 @@
 # Run the Queue-Times.com wait time fetcher in a loop: fetch, write to staging/queue_times, sleep, repeat.
 # The scraper writes to staging only; the morning ETL merges yesterday's staging into fact_tables/clean.
+# By default uses dimparkhours to only call the API when a park is in-window (open-90 to close+90 in park TZ).
 # Staging is also available for live use (e.g. Twitch/YouTube). Stop with Ctrl+C.
 #
-# Optional: Register a Windows scheduled task "At log on" or "At startup" that runs this script
-# so the loop restarts after reboot.
+# ThemeParkQueueTimes_5min (from register_scheduled_tasks.ps1) runs this script at log on with
+# -IntervalSeconds 300 so the loop runs every 5 minutes indefinitely.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -IntervalSeconds 900 -OutputBase "D:\Path\output"
+#   powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -IntervalSeconds 300 -OutputBase "D:\Path"
 
 param(
-    [int]   $IntervalSeconds = 600,   # 10 minutes between fetches
-    [string] $OutputBase     = ""     # default: (ProjectRoot)/output
+    [int]   $IntervalSeconds = 300,   # 5 minutes between fetches (open-90 to close+90 window)
+    [string] $OutputBase     = ""     # default: from config/config.json or built-in
 )
 
 $ErrorActionPreference = "Stop"

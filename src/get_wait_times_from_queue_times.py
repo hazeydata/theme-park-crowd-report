@@ -34,13 +34,16 @@ OUTPUT
 KEY FEATURES
 ================================================================================
   - API-based: Fetches live data from queue-times.com
+  - HOURS-BASED FILTER: Uses dimparkhours to only call the API when a park is
+    in-window (open-90 to close+90 in park TZ). If no parks in-window, exits
+    without API calls. Use --no-hours-filter to disable.
   - DEDUPLICATION: SQLite DB ensures no duplicate rows across runs
   - SAME OUTPUT FORMAT: Compatible with existing S3 pipeline output
   - PROCESS LOCK: Prevents multiple instances from running at once
   - STAGING (not fact_tables): Raw fact_tables stay static for modelling; scraper writes
     to staging/queue_times; morning ETL appends yesterday's staging into fact_tables.
   - CONTINUOUS MODE: --interval SECS runs a loop (fetch, write to staging, sleep).
-    Staging is also available for live use (e.g. Twitch/YouTube).
+    e.g. --interval 300 for every 5 minutes. Staging is also available for live use.
 """
 
 from __future__ import annotations
@@ -53,7 +56,7 @@ import re
 import sqlite3
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -159,6 +162,157 @@ def load_queue_times_mapping(config_dir: Path) -> Optional[pd.DataFrame]:
         except Exception as e:
             logging.warning(f"Could not load queue-times mapping: {e}")
     return None
+
+
+# Scraping window: 90 minutes before earliest open (including EMH) to 90 minutes after close.
+SCRAPE_WINDOW_BEFORE_OPEN_MIN = 90
+SCRAPE_WINDOW_AFTER_CLOSE_MIN = 90
+
+
+def load_dimparkhours(output_base: Path) -> Optional[pd.DataFrame]:
+    """
+    Load dimparkhours from dimension_tables/dimparkhours.csv.
+    Used to determine if a park is within its scraping window (open-90 to close+90 in park TZ).
+    Returns None if missing or on error.
+    """
+    path = output_base / "dimension_tables" / "dimparkhours.csv"
+    if not path.exists():
+        return None
+    try:
+        return pd.read_csv(path, low_memory=False)
+    except Exception as e:
+        logging.warning(f"Could not load dimparkhours: {e}")
+        return None
+
+
+def _first_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """Return the first column name in candidates that exists in df, or None."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _parse_time_to_minutes(s) -> Optional[int]:
+    """Parse a time string (HH:MM, H:MM, HH:MM:SS) to minutes since midnight. Returns None on failure."""
+    if pd.isna(s) or s is None or (isinstance(s, str) and not str(s).strip()):
+        return None
+    s = str(s).strip()
+    parts = re.split(r"[\s:]+", s, 3)
+    if len(parts) < 2:
+        return None
+    try:
+        h, m = int(parts[0]), int(parts[1])
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return h * 60 + m
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _get_park_date_local(now: datetime, tz: ZoneInfo) -> str:
+    """Park operational date in park TZ using 6am rule: if hour < 6, use previous calendar date."""
+    local = now.astimezone(tz)
+    if local.hour < 6:
+        d = (local.date() - timedelta(days=1))
+    else:
+        d = local.date()
+    return d.strftime("%Y-%m-%d")
+
+
+def get_in_window_park_ids(
+    dimparkhours: pd.DataFrame,
+    parks: List[dict],
+    now: datetime,
+    logger: logging.Logger,
+) -> List[int]:
+    """
+    For each park in QUEUE_TIMES_PARK_MAP, determine if 'now' falls in the scraping window
+    (earliest_open - 90 min, close + 90 min) in that park's timezone. Park date uses 6am rule.
+    Returns list of queue-times.com park IDs that are in-window.
+    """
+    date_col = _first_column(dimparkhours, ["park_date", "date"])
+    park_col = _first_column(dimparkhours, ["park", "park_code", "code"])
+    open_col = _first_column(dimparkhours, ["open", "open_time", "open_time_1"])
+    close_col = _first_column(dimparkhours, ["close", "close_time", "close_time_1"])
+    emh_col = _first_column(dimparkhours, ["emh_open", "early_entry", "early_entry_open", "extra_magic_hours", "emh"])
+
+    if not date_col or not park_col or not open_col or not close_col:
+        logger.warning(
+            "dimparkhours missing required columns (need date, park, open, close). "
+            "Treating all mapped parks as in-window."
+        )
+        return [p.get("id") for p in parks if p.get("id") in QUEUE_TIMES_PARK_MAP]
+
+    # Normalize date to YYYY-MM-DD
+    dimparkhours = dimparkhours.copy()
+    dimparkhours["_pd_norm"] = pd.to_datetime(dimparkhours[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
+    dimparkhours["_park_norm"] = dimparkhours[park_col].astype(str).str.strip().str.lower()
+
+    in_window: List[int] = []
+    for park in parks:
+        park_id = park.get("id")
+        if park_id not in QUEUE_TIMES_PARK_MAP:
+            continue
+        park_code = QUEUE_TIMES_PARK_MAP[park_id]
+        tz_str = park.get("timezone", "UTC")
+        try:
+            tz = ZoneInfo(tz_str)
+        except Exception:
+            tz = ZoneInfo("UTC")
+        park_date = _get_park_date_local(now, tz)
+
+        rows = dimparkhours[
+            (dimparkhours["_pd_norm"] == park_date) &
+            (dimparkhours["_park_norm"] == park_code.lower())
+        ]
+        if rows.empty:
+            logger.debug(f"dimparkhours: no row for park={park_code} date={park_date}; treating as in-window")
+            in_window.append(park_id)
+            continue
+
+        # Aggregate if multiple rows: earliest open, latest close; earliest EMH if present
+        open_min = None
+        close_min = None
+        emh_min = None
+        for _, r in rows.iterrows():
+            o = _parse_time_to_minutes(r.get(open_col))
+            c = _parse_time_to_minutes(r.get(close_col))
+            if o is not None:
+                open_min = o if open_min is None else min(open_min, o)
+            if c is not None:
+                close_min = c if close_min is None else max(close_min, c)
+            if emh_col and r.get(emh_col) is not None:
+                e = _parse_time_to_minutes(r.get(emh_col))
+                if e is not None:
+                    emh_min = e if emh_min is None else min(emh_min, e)
+
+        if open_min is None or close_min is None:
+            logger.debug(f"dimparkhours: could not parse open/close for {park_code} {park_date}; treating as in-window")
+            in_window.append(park_id)
+            continue
+
+        earliest_open = min(open_min, emh_min) if emh_min is not None else open_min
+        window_start_min = earliest_open - SCRAPE_WINDOW_BEFORE_OPEN_MIN
+        window_end_min = close_min + SCRAPE_WINDOW_AFTER_CLOSE_MIN
+
+        park_date_obj = date.fromisoformat(park_date)
+        base = datetime(park_date_obj.year, park_date_obj.month, park_date_obj.day, 0, 0, 0, tzinfo=tz)
+        window_start_dt = base + timedelta(minutes=window_start_min)
+        window_end_dt = base + timedelta(minutes=window_end_min)
+        now_park = now.astimezone(tz)
+        in_range = window_start_dt <= now_park <= window_end_dt
+
+        if in_range:
+            in_window.append(park_id)
+        else:
+            logger.debug(
+                f"Out of window: {park_code} (id={park_id}) "
+                f"park_date={park_date} window {window_start_dt.strftime('%H:%M')}-{window_end_dt.strftime('%H:%M')} (local) "
+                f"now={now_park.strftime('%H:%M')}"
+            )
+
+    return in_window
 
 
 def load_entity_table(output_base: Path) -> Optional[pd.DataFrame]:
@@ -400,6 +554,7 @@ def transform_queue_times_data(
 def process_queue_times(
     output_base: Path,
     park_ids: Optional[List[int]] = None,
+    use_hours_filter: bool = True,
     logger: logging.Logger = None,
 ) -> int:
     """
@@ -408,6 +563,7 @@ def process_queue_times(
     Args:
         output_base: Base output directory
         park_ids: Optional list of park IDs to process. If None, processes all parks.
+        use_hours_filter: If True, load dimparkhours and only scrape parks in-window (open-90 to close+90).
         logger: Logger instance
     
     Returns:
@@ -444,6 +600,20 @@ def process_queue_times(
         if parks is None:
             logger.error("Failed to fetch parks list")
             return 0
+        
+        # Filter to parks in scraping window (open-90 to close+90 in park TZ) using dimparkhours
+        if use_hours_filter:
+            dimph = load_dimparkhours(output_base)
+            if dimph is not None:
+                now = datetime.now(ZoneInfo("UTC"))
+                in_window = get_in_window_park_ids(dimph, parks, now, logger)
+                if not in_window:
+                    logger.info("No parks in scraping window (open-90 to close+90); exiting without API calls.")
+                    return 0
+                parks = [p for p in parks if p.get("id") in in_window]
+                logger.info(f"Hours filter: {len(in_window)} parks in-window, processing those")
+            else:
+                logger.info("dimparkhours not found; processing all mapped parks (no hours filter)")
         
         # Filter to requested park IDs if specified
         if park_ids is not None:
@@ -536,7 +706,12 @@ def main() -> None:
         type=int,
         default=0,
         metavar="SECS",
-        help="Run continuously: fetch, write to staging/queue_times, then sleep SECS and repeat. Default 0 = one-shot. e.g. --interval 600 for every 10 minutes.",
+        help="Run continuously: fetch, write to staging/queue_times, then sleep SECS and repeat. Default 0 = one-shot. e.g. --interval 300 for every 5 minutes.",
+    )
+    ap.add_argument(
+        "--no-hours-filter",
+        action="store_true",
+        help="Do not filter by park hours; scrape all mapped parks. By default uses dimparkhours to only scrape when open-90 to close+90 in park TZ.",
     )
     args = ap.parse_args()
 
@@ -565,8 +740,10 @@ def main() -> None:
         logger.error("--interval must be >= 1 (seconds)")
         sys.exit(1)
 
+    use_hours_filter = not args.no_hours_filter
+
     def run_once() -> int:
-        return process_queue_times(output_base, park_ids, logger)
+        return process_queue_times(output_base, park_ids, use_hours_filter=use_hours_filter, logger=logger)
 
     if args.interval:
         logger.info(f"Continuous mode: interval={args.interval}s. Ctrl+C to stop.")
