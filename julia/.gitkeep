@@ -1,0 +1,2 @@
+# This file ensures the julia/ directory is tracked by git
+# even when empty or before Manifest.toml is generated

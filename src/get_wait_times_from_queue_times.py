@@ -44,6 +44,10 @@ KEY FEATURES
     to staging/queue_times; morning ETL appends yesterday's staging into fact_tables.
   - CONTINUOUS MODE: --interval SECS runs a loop (fetch, write to staging, sleep).
     e.g. --interval 300 for every 5 minutes. Staging is also available for live use.
+  - OBSERVED_AT: Taken from queue-times last_updated (per ride). The API can return
+    stale timestamps; observed_at may be older than the fetch time. The scraper logs
+    when observed_at is more than 24h older than fetch time (STALE_OBSERVED_AT_THRESHOLD_HOURS).
+    See docs/STALE_OBSERVED_AT.md.
 """
 
 from __future__ import annotations
@@ -99,6 +103,9 @@ LOCK_FILE_NAME = "processing_queue_times.lock"
 REQUEST_TIMEOUT = 30
 REQUEST_RETRIES = 3
 REQUEST_RETRY_DELAY = 2
+
+# observed_at comes from queue-times last_updated; if older than this vs fetch time, we log a warning
+STALE_OBSERVED_AT_THRESHOLD_HOURS = 24
 
 # =============================================================================
 # QUEUE-TIMES.COM PARK ID TO PARK CODE MAPPING
@@ -453,9 +460,15 @@ def transform_queue_times_data(
     park_tz: ZoneInfo,
     queue_times_mapping: Optional[pd.DataFrame],
     logger: logging.Logger,
+    fetch_time_utc: Optional[datetime] = None,
 ) -> pd.DataFrame:
     """
     Transform queue-times.com data to our format.
+    
+    observed_at is taken from each ride's last_updated (queue-times API). If
+    fetch_time_utc is provided and observed_at is older than
+    STALE_OBSERVED_AT_THRESHOLD_HOURS vs fetch_time_utc, a warning is logged
+    (queue-times can return stale last_updated).
     
     Input format:
     {
@@ -495,6 +508,7 @@ def transform_queue_times_data(
     
     # Collect all rides from lands and top-level
     all_rides = []
+    stale_examples: List[Tuple[str, str, float, int]] = []  # (entity_code, observed_at, age_hours, wait_min)
     
     # Rides in lands
     if "lands" in queue_times_data:
@@ -522,9 +536,10 @@ def transform_queue_times_data(
         # Map ride to entity code using ID-based mapping
         entity_code = map_ride_to_entity_code(ride_id, ride_name, park_code, queue_times_mapping)
         
-        # Parse and convert timestamp to park timezone
+        # Parse and convert timestamp to park timezone.
+        # observed_at comes from queue-times last_updated; we use it as-is. The API can return
+        # stale values (observed_at much older than fetch time). See docs/STALE_OBSERVED_AT.md.
         try:
-            # last_updated is UTC ISO 8601
             observed_at_utc = pd.to_datetime(last_updated, utc=True)
             observed_at_local = observed_at_utc.tz_convert(park_tz)
             observed_at_str = observed_at_local.isoformat()
@@ -532,12 +547,31 @@ def transform_queue_times_data(
             logger.warning(f"Could not parse timestamp {last_updated} for ride {ride_name}: {e}")
             continue
         
+        # Audit: log when observed_at is much older than fetch time (API returning stale last_updated)
+        if fetch_time_utc is not None:
+            fetch_ts = pd.Timestamp(fetch_time_utc, tz="UTC")
+            age_hours = (fetch_ts - observed_at_utc).total_seconds() / 3600
+            if age_hours > STALE_OBSERVED_AT_THRESHOLD_HOURS:
+                stale_examples.append((entity_code, observed_at_str, age_hours, int(wait_time)))
+        
         rows.append({
             "entity_code": entity_code,
             "observed_at": observed_at_str,
             "wait_time_type": "POSTED",
             "wait_time_minutes": int(wait_time),
         })
+    
+    if stale_examples:
+        samples = stale_examples[:3]  # log up to 3 for audit
+        sample_str = "; ".join(
+            f"entity={s[0]} observed_at={s[1]} age_h={s[2]:.1f} min={s[3]}"
+            for s in samples
+        )
+        logger.warning(
+            f"Stale observed_at: {len(stale_examples)} rows had last_updated > {STALE_OBSERVED_AT_THRESHOLD_HOURS}h "
+            f"older than fetch time (queue-times API can return stale timestamps). "
+            f"Samples: {sample_str}. See docs/STALE_OBSERVED_AT.md."
+        )
     
     if not rows:
         return pd.DataFrame(columns=["entity_code", "observed_at", "wait_time_type", "wait_time_minutes"])
@@ -649,10 +683,12 @@ def process_queue_times(
             if queue_times_data is None:
                 logger.warning(f"Failed to fetch wait times for park {park_name} (id={park_id})")
                 continue
+            fetch_time_utc = datetime.now(ZoneInfo("UTC"))
             
-            # Transform data
+            # Transform data (pass fetch_time_utc to audit stale observed_at from queue-times last_updated)
             df = transform_queue_times_data(
-                park_id, park_name, queue_times_data, park_tz, queue_times_mapping, logger
+                park_id, park_name, queue_times_data, park_tz, queue_times_mapping, logger,
+                fetch_time_utc=fetch_time_utc,
             )
             
             if df.empty:

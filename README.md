@@ -12,6 +12,11 @@ This pipeline:
 5. **Derives park codes and dates** from the data
 6. **Writes clean CSV files** organized by park and date: `fact_tables/clean/YYYY-MM/{park}_{YYYY-MM-DD}.csv`
 
+**Fact table schema** (columns, `observed_at`, `wait_time_type`, sources): [docs/SCHEMA.md](docs/SCHEMA.md).  
+**Legacy pipeline (attraction-io) alignment** and next steps: [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md).  
+**Critical review** of the legacy pipeline (efficiency, workflow, quality) and how we improve: [docs/LEGACY_PIPELINE_CRITICAL_REVIEW.md](docs/LEGACY_PIPELINE_CRITICAL_REVIEW.md).  
+**Modeling and WTI methodology** (ACTUAL curves, forecast, live inference, Wait Time Index): [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).
+
 ## Project Structure
 
 ```
@@ -190,6 +195,41 @@ python src/build_dimseason.py --output-base "D:\Custom\Path"
 ```
 
 **What it does**: Reads `dimension_tables/dimdategroupid.csv`, assigns `season` and `season_year` from `date_group_id` patterns (CHRISTMAS_PEAK, holiday carry, Presidents+Mardi Gras combined window, AFTER_EASTER/BEFORE_EASTER, SPRING/SUMMER/AUTUMN/WINTER). Writes `dimension_tables/dimseason.csv`. Depends on dimdategroupid; run `build_dimdategroupid` first. Adapted from legacy Julia `run_dimSeason.jl`; always overwrites.
+
+### Data Cleaning
+
+All dimension tables are cleaned and standardized for consistency:
+
+```powershell
+# Clean all dimension tables
+python src/clean_all_dimensions.py
+
+# Or clean individually
+python src/clean_dimentity.py
+python src/clean_dimparkhours.py
+python src/clean_dimeventdays.py
+python src/clean_dimevents.py
+python src/clean_dimmetatable.py
+```
+
+**What cleaning does:**
+- **Standardizes column names** (e.g., `code` → `entity_code`, `date` → `park_date`, `park` → `park_code`)
+- **Applies defaults** (`opened_on` = park opening date if blank, `extinct_on` = 2099-01-01 if blank)
+- **Converts data types** (booleans, dates formatted as YYYY-MM-DD)
+- **Trims strings** and converts empty strings to NULL
+- **Validates ranges** (numeric columns)
+
+**Inspection tool:**
+```powershell
+python src/inspect_dimension_tables.py
+```
+
+Shows column names, types, null counts, and sample values for all dimension tables.
+
+**Documentation:**
+- **Schema definitions**: [docs/SCHEMAS.md](docs/SCHEMAS.md)
+- **Column naming standard**: [docs/COLUMN_NAMING_STANDARD.md](docs/COLUMN_NAMING_STANDARD.md)
+- **Cleaning plan**: [docs/DATA_CLEANING_PLAN.md](docs/DATA_CLEANING_PLAN.md)
 
 ## Output Structure
 

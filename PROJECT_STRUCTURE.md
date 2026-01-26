@@ -55,7 +55,10 @@ theme-park-crowd-report/
 ├── PROJECT_STRUCTURE.md              # This file
 ├── CHANGES.md                        # Change log
 ├── CONNECTION_ERROR_FIX.md           # Connection error handling
-└── CONCURRENT_EXECUTION_FIX.md       # Process lock and concurrent run prevention
+├── CONCURRENT_EXECUTION_FIX.md       # Process lock and concurrent run prevention
+├── docs/                             # Schema and contract docs
+│   └── SCHEMA.md                     # Fact table columns, observed_at, wait_time_type, sources
+└── OUTPUT_LAYOUT_REVIEW.md           # Output layout and config (implemented)
 ```
 
 ## Directory Purposes
@@ -169,6 +172,10 @@ output_base/
 ```
 
 **Why separate from code**: Keeps data separate from source code; one output_base gives one `logs/` and one set of dimension_tables.
+
+### `docs/` - Schema and contract docs
+
+**`SCHEMA.md`**: Fact table columns (`entity_code`, `observed_at`, `wait_time_type`, `wait_time_minutes`), `observed_at` semantics and 6am rule, `wait_time_type` ranges, sources (S3, queue-times), and path layout. Used by validation, reports, and modeling.
 
 ## File Organization Principles
 

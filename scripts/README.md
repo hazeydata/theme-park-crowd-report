@@ -96,6 +96,19 @@ python scripts/report_wait_time_db.py --output-base "D:\Path" --report reports/d
 
 **Options**: `--output-base`, `--report`, `--lookback-days` (default 14), `--quick`.
 
+### `report_queue_times_unmapped.py`
+
+Lists **queue-times.com attractions that have no row** in `config/queue_times_entity_mapping.csv`. Fetches parks and `queue_times` from the API, collects all rides in mapped parks, left-joins to the mapping, and writes unattributed `(park_code, queue_times_id, queue_times_name, last_seen)` to `reports/queue_times_unmapped.csv` for review. `last_seen` is the report run date (YYYY-MM-DD).
+
+**Run** (requires network for queue-times.com API):
+
+```powershell
+python scripts/report_queue_times_unmapped.py
+python scripts/report_queue_times_unmapped.py --output-base "D:\Path" --report reports/unmapped.csv
+```
+
+**Options**: `--output-base`, `--report` (default: `output_base/reports/queue_times_unmapped.csv`).
+
 ## Potential Future Scripts
 
 Examples of scripts that might go here:

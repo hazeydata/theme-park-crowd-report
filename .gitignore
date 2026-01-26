@@ -65,3 +65,9 @@ temp/**
 !temp/README.md
 # Logs live only under output_base/logs; ignore repo-root logs/ if created by mistake
 logs/
+
+# Julia
+julia/Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem

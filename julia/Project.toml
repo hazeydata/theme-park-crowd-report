@@ -1,0 +1,14 @@
+name = "ThemeParkDashboards"
+version = "0.1.0"
+
+[deps]
+Dash = "1b08a953-4be3-4667-9ae7-c8a5eb3b8b1c"
+DashBootstrapComponents = "1b08a953-4be3-4667-9ae7-c8a5eb3b8b1c"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf12d00"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+PlotlyJS = "f0f68f2c-4968-5e81-91da-67840de0976a"
+HTTP = "cd3eb016-35c9-4fea-b123-63b987c5c841"
+
+[compat]
+julia = "1.9"

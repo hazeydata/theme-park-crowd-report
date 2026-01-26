@@ -198,6 +198,7 @@ def main() -> None:
             retries={"max_attempts": 5, "mode": "adaptive"},
             read_timeout=120,
             connect_timeout=60,
+            proxies={},  # Disable proxies
         )
         s3 = boto3.client("s3", config=config)
         logger.info("S3 client initialized")
