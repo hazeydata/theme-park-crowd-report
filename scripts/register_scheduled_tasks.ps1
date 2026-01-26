@@ -72,6 +72,22 @@ Register-ScheduledTask `
     -Force
 Write-Host "Registered: ThemeParkQueueTimes_5min (At log on, interval 300s)"
 
+# Wait Time DB Report: run at 5:30 AM daily (after 5am ETL completes)
+$ReportScript = Join-Path $ProjectRoot "scripts\report_wait_time_db.py"
+$ReportAction = New-ScheduledTaskAction `
+    -Execute $PythonExe `
+    -Argument "`"$ReportScript`" --quick --lookback-days 14" `
+    -WorkingDirectory $ProjectRoot
+$ReportTrigger = New-ScheduledTaskTrigger -Daily -At "5:30AM"
+Register-ScheduledTask `
+    -TaskName "ThemeParkWaitTimeReport_530am" `
+    -Action $ReportAction `
+    -Trigger $ReportTrigger `
+    -Settings $Settings `
+    -Description "Wait Time DB Report - daily 5:30 AM Eastern. Generates reports/wait_time_db_report.md with --quick for fast daily checks." `
+    -Force
+Write-Host "Registered: ThemeParkWaitTimeReport_530am (Daily 5:30 AM)"
+
 Write-Host ""
 Write-Host "Done. Tasks use local time; set system time zone to Eastern for 5/6/7 AM ET."
 Write-Host "View in Task Scheduler: taskschd.msc -> Task Scheduler Library"

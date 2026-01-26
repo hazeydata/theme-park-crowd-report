@@ -16,6 +16,7 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 
 Creates:
 - **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (wait-time ETL, primary)
+- **ThemeParkWaitTimeReport_530am** — Daily at 5:30 AM (wait-time DB report, after 5am ETL)
 - **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM (entity, park hours, events, metatable from S3; build dimdategroupid, dimseason)
 - **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (wait-time ETL, backup)
 
@@ -85,6 +86,8 @@ Produces an **easily consumable Markdown report** of what's in the wait time fac
 3. **Recent coverage** — Grid: last N days × parks. Cells show ✓ (file exists) / — (no file) with `--quick`, or row counts otherwise.
 
 Report path: `reports/wait_time_db_report.md` under the output base. **Overwritten each run** so you can always open the same file for daily or ad-hoc checks.
+
+**Scheduled**: Runs automatically at **5:30 AM Eastern** (after 5am ETL) via **ThemeParkWaitTimeReport_530am** scheduled task. Uses `--quick` for fast execution.
 
 **When to use `--quick`**: Skip row counts; grid shows ✓/— only. Faster on slow or remote paths (e.g. Dropbox). Use for quick daily coverage checks.
 

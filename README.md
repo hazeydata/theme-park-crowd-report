@@ -382,7 +382,7 @@ Three Windows scheduled tasks run **daily**:
 | **ThemeParkDimensionFetch_6am** | 6:00 AM Eastern | Fetches entity, park hours, events, metatable from S3; builds dimdategroupid, dimseason → dimension_tables |
 | **ThemeParkWaitTimeETL_7am** | 7:00 AM Eastern | Backup ETL (e.g. if 5 AM didn’t run or S3 updates were late) |
 
-The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, and `build_dimseason.py` in sequence. It writes to the same **output_base** as the ETL (from `config/config.json` or default): `dimension_tables/` and `logs/` under that path. It does not use the lock.
+The **process lock** (`state/processing.lock`) ensures the 7 AM ETL run does not overlap the 5 AM run. The 6 AM dimension fetch runs `scripts/run_dimension_fetches.ps1`, which invokes `get_entity_table_from_s3.py`, `get_park_hours_from_s3.py`, `get_events_from_s3.py`, `get_metatable_from_s3.py`, `build_dimdategroupid.py`, and `build_dimseason.py` in sequence. It writes to the same **output_base** as the ETL (from `config/config.json` or default): `dimension_tables/` and `logs/` under that path. It does not use the lock. The 5:30 AM report task runs `scripts/report_wait_time_db.py --quick` after the 5am ETL completes.
 
 **Register the tasks** (run once, or after changes):
 
@@ -392,7 +392,7 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 
 The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\theme-park-crowd-report`. Edit `scripts/register_scheduled_tasks.ps1` if your Python path or project root differ.
 
-**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkDimensionFetch_6am` / `ThemeParkWaitTimeETL_7am`.
+**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkWaitTimeReport_530am` / `ThemeParkDimensionFetch_6am` / `ThemeParkWaitTimeETL_7am`.
 
 **Time zone**: Tasks use the **system local time**. Set Windows to Eastern Time so 5:00, 6:00, and 7:00 AM are Eastern.
 
