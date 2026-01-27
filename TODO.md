@@ -171,7 +171,11 @@
   - Aggregates POSTED by (entity, dategroupid, hour)
   - Saves to Parquet for fast lookup
 
-**Future**: Forecast script that generates both predicted ACTUAL and predicted POSTED for future dates.
+**Forecast script**: [scripts/generate_forecast.py](scripts/generate_forecast.py)
+  - Generates predicted ACTUAL (from without-POSTED model) and predicted POSTED (from aggregates)
+  - For future dates (tomorrow to +2 years)
+  - At 5-minute resolution for all park operating hours
+  - Output: `curves/forecast/{entity_code}_{park_date}.csv`
 
 ---
 
