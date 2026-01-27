@@ -177,6 +177,19 @@
   - At 5-minute resolution for all park operating hours
   - Output: `curves/forecast/{entity_code}_{park_date}.csv`
 
+**Backfill script**: [scripts/generate_backfill.py](scripts/generate_backfill.py)
+  - Generates historical ACTUAL curves using with-POSTED model
+  - For past dates (specified date range)
+  - Uses observed ACTUAL when available, otherwise imputed from POSTED
+  - At 5-minute resolution for all park operating hours
+  - Output: `curves/backfill/{entity_code}_{park_date}.csv` (columns: entity_code, park_date, time_slot, actual, source)
+
+**WTI script**: [scripts/calculate_wti.py](scripts/calculate_wti.py)
+  - Calculates Wait Time Index (WTI) for each (park, park_date, time_slot)
+  - WTI = mean(actual) over all entities where actual is not null (closed)
+  - Uses backfill curves (historical) and forecast curves (future)
+  - Output: `wti/wti.parquet` and `wti/wti.csv` (columns: park_code, park_date, time_slot, wti, n_entities, min_actual, max_actual)
+
 ---
 
 ## Next Steps (from attraction-io alignment)
