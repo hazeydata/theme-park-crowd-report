@@ -10,7 +10,8 @@ for future dates. Predicted POSTED is used for:
   2. Building trust: Show accuracy of predictions in real-time
   3. Live streaming content: Watch predictions perform in real-time
 
-Aggregation strategy: (entity_code, dategroupid, hour) → median POSTED
+Aggregation strategy: (entity_code, dategroupid, hour) → weighted median/mean POSTED
+Recency weighting: More recent dates weighted higher (1.0 / (1.0 + days_ago / 365.0))
 
 ================================================================================
 USAGE
@@ -45,7 +46,9 @@ AGGREGATION STRATEGY
 STORAGE
 ================================================================================
 Aggregates are saved to `aggregates/posted_aggregates.parquet` for fast lookup.
-Format: entity_code, dategroupid, hour, posted_median, posted_mean, posted_count
+Format: entity_code, dategroupid, hour, posted_median (weighted), posted_mean (weighted), 
+        posted_median_unweighted, posted_mean_unweighted, posted_count, avg_recency_weight,
+        min_park_date, max_park_date
 """
 
 from __future__ import annotations
@@ -85,7 +88,9 @@ def build_posted_aggregates(
         logger: Optional logger
     
     Returns:
-        DataFrame with columns: entity_code, dategroupid, hour, posted_median, posted_mean, posted_count
+        DataFrame with columns: entity_code, dategroupid, hour, posted_median (weighted), 
+        posted_mean (weighted), posted_median_unweighted, posted_mean_unweighted, 
+        posted_count, avg_recency_weight, min_park_date, max_park_date
     """
     from processors.features import load_dims
     
@@ -146,8 +151,16 @@ def build_posted_aggregates(
             observed_dt = pd.to_datetime(df_posted["observed_at"], errors="coerce")
             df_posted["hour"] = observed_dt.dt.hour
             
+            # Calculate recency weight (same formula as park hours donor)
+            # Weight = 1.0 / (1.0 + days_ago / 365.0)
+            # More recent dates get higher weight
+            park_date_obj = pd.to_datetime(df_posted["park_date"], errors="coerce").dt.date
+            today = date.today()
+            days_ago = (today - park_date_obj).dt.days
+            df_posted["recency_weight"] = 1.0 / (1.0 + days_ago / 365.0)
+            
             # Select columns
-            keep_cols = ["entity_code", "dategroupid", "hour", "wait_time_minutes"]
+            keep_cols = ["entity_code", "dategroupid", "hour", "wait_time_minutes", "park_date", "recency_weight"]
             available_cols = [c for c in keep_cols if c in df_posted.columns]
             df_posted = df_posted[available_cols].copy()
             
@@ -158,7 +171,8 @@ def build_posted_aggregates(
             df_posted = df_posted[
                 df_posted["posted"].notna() &
                 df_posted["dategroupid"].notna() &
-                df_posted["hour"].notna()
+                df_posted["hour"].notna() &
+                df_posted["recency_weight"].notna()
             ]
             
             if not df_posted.empty:
@@ -180,13 +194,54 @@ def build_posted_aggregates(
     if logger:
         logger.info(f"Combined {len(combined):,} POSTED observations")
     
-    # Aggregate by (entity_code, dategroupid, hour)
-    aggregates = combined.groupby(["entity_code", "dategroupid", "hour"]).agg({
-        "posted": ["median", "mean", "count"]
-    }).reset_index()
+    # Aggregate by (entity_code, dategroupid, hour) with recency weighting
+    # Use weighted median and weighted mean
+    def weighted_median(values: pd.Series, weights: pd.Series) -> float:
+        """Calculate weighted median."""
+        if len(values) == 0:
+            return None
+        # Sort by values
+        sorted_df = pd.DataFrame({"value": values, "weight": weights}).sort_values("value")
+        cumsum_weights = sorted_df["weight"].cumsum()
+        total_weight = cumsum_weights.iloc[-1]
+        median_idx = (cumsum_weights >= total_weight / 2).idxmax()
+        return float(sorted_df.loc[median_idx, "value"])
     
-    # Flatten column names
-    aggregates.columns = ["entity_code", "dategroupid", "hour", "posted_median", "posted_mean", "posted_count"]
+    def weighted_mean(values: pd.Series, weights: pd.Series) -> float:
+        """Calculate weighted mean."""
+        if len(values) == 0 or weights.sum() == 0:
+            return None
+        return float((values * weights).sum() / weights.sum())
+    
+    aggregates_list = []
+    for (entity, dgid, hour), group in combined.groupby(["entity_code", "dategroupid", "hour"]):
+        posted_values = group["posted"]
+        weights = group["recency_weight"]
+        
+        # Calculate weighted statistics
+        wgt_median = weighted_median(posted_values, weights)
+        wgt_mean = weighted_mean(posted_values, weights)
+        count = len(group)
+        
+        # Also calculate unweighted for comparison
+        unweighted_median = float(posted_values.median()) if not posted_values.empty else None
+        unweighted_mean = float(posted_values.mean()) if not posted_values.empty else None
+        
+        aggregates_list.append({
+            "entity_code": entity,
+            "dategroupid": dgid,
+            "hour": hour,
+            "posted_median": wgt_median,
+            "posted_mean": wgt_mean,
+            "posted_median_unweighted": unweighted_median,
+            "posted_mean_unweighted": unweighted_mean,
+            "posted_count": count,
+            "avg_recency_weight": float(weights.mean()),
+            "min_park_date": group["park_date"].min(),
+            "max_park_date": group["park_date"].max(),
+        })
+    
+    aggregates = pd.DataFrame(aggregates_list)
     
     # Sort
     aggregates = aggregates.sort_values(["entity_code", "dategroupid", "hour"]).reset_index(drop=True)
@@ -196,6 +251,7 @@ def build_posted_aggregates(
         logger.info(f"  Entities: {aggregates['entity_code'].nunique()}")
         logger.info(f"  Dategroupids: {aggregates['dategroupid'].nunique()}")
         logger.info(f"  Hours: {aggregates['hour'].nunique()}")
+        logger.info(f"  Using recency weighting: more recent dates weighted higher")
     
     return aggregates
 
@@ -424,5 +480,147 @@ def get_predicted_posted_batch(
             "hour": hour,
             "posted_predicted": predicted,
         })
+    
+    return pd.DataFrame(results)
+
+
+def get_predicted_posted_5min_slots(
+    entity_code: str,
+    park_date: date,
+    park_open_time: Optional[str] = None,
+    park_close_time: Optional[str] = None,
+    aggregates: Optional[pd.DataFrame] = None,
+    output_base: Optional[Path] = None,
+    logger: Optional[logging.Logger] = None,
+) -> pd.DataFrame:
+    """
+    Get predicted POSTED for all 5-minute time slots in a day.
+    
+    Generates 5-minute intervals from park open to close, using hourly aggregates
+    to fill in predicted POSTED for each slot.
+    
+    Args:
+        entity_code: Entity code
+        park_date: Park date
+        park_open_time: Park opening time (HH:MM format, e.g., "09:00"). If None, uses park hours.
+        park_close_time: Park closing time (HH:MM format, e.g., "22:00"). If None, uses park hours.
+        aggregates: Aggregates DataFrame (if None, loads from file)
+        output_base: Pipeline output base directory (if aggregates is None)
+        logger: Optional logger
+    
+    Returns:
+        DataFrame with columns: time_slot (HH:MM), hour, posted_predicted
+    """
+    # Get park hours if not provided
+    if park_open_time is None or park_close_time is None:
+        from processors.park_hours_versioning import get_park_hours_for_date, load_versioned_table
+        
+        if output_base is None:
+            output_base = get_output_base()
+        
+        versioned_df = load_versioned_table(output_base)
+        if versioned_df is not None:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            hours = get_park_hours_for_date(
+                park_date,
+                entity_code[:2] if len(entity_code) >= 2 else "MK",
+                versioned_df,
+                as_of=datetime.now(ZoneInfo("UTC")),
+                logger=logger,
+            )
+            if hours:
+                if park_open_time is None:
+                    park_open_time = hours.get("opening_time", "09:00")
+                if park_close_time is None:
+                    park_close_time = hours.get("closing_time", "22:00")
+    
+    # Default if still None
+    if park_open_time is None:
+        park_open_time = "09:00"
+    if park_close_time is None:
+        park_close_time = "22:00"
+    
+    # Parse times
+    open_hour, open_min = map(int, park_open_time.split(":"))
+    close_hour, close_min = map(int, park_close_time.split(":"))
+    
+    # Generate 5-minute slots
+    results = []
+    current_hour = open_hour
+    current_min = open_min
+    
+    # Handle overnight (close < open)
+    if close_hour < open_hour or (close_hour == open_hour and close_min < open_min):
+        # Overnight: from open to midnight, then midnight to close
+        # First part: open to 23:55
+        while current_hour < 24:
+            time_slot = f"{current_hour:02d}:{current_min:02d}"
+            predicted = get_predicted_posted(
+                entity_code,
+                park_date,
+                current_hour,
+                aggregates=aggregates,
+                output_base=output_base,
+                logger=logger,
+            )
+            results.append({
+                "time_slot": time_slot,
+                "hour": current_hour,
+                "posted_predicted": predicted,
+            })
+            
+            current_min += 5
+            if current_min >= 60:
+                current_min = 0
+                current_hour += 1
+                if current_hour >= 24:
+                    break
+        
+        # Second part: 00:00 to close
+        current_hour = 0
+        current_min = 0
+        while current_hour < close_hour or (current_hour == close_hour and current_min <= close_min):
+            time_slot = f"{current_hour:02d}:{current_min:02d}"
+            predicted = get_predicted_posted(
+                entity_code,
+                park_date,
+                current_hour,
+                aggregates=aggregates,
+                output_base=output_base,
+                logger=logger,
+            )
+            results.append({
+                "time_slot": time_slot,
+                "hour": current_hour,
+                "posted_predicted": predicted,
+            })
+            
+            current_min += 5
+            if current_min >= 60:
+                current_min = 0
+                current_hour += 1
+    else:
+        # Normal day: open to close
+        while current_hour < close_hour or (current_hour == close_hour and current_min <= close_min):
+            time_slot = f"{current_hour:02d}:{current_min:02d}"
+            predicted = get_predicted_posted(
+                entity_code,
+                park_date,
+                current_hour,
+                aggregates=aggregates,
+                output_base=output_base,
+                logger=logger,
+            )
+            results.append({
+                "time_slot": time_slot,
+                "hour": current_hour,
+                "posted_predicted": predicted,
+            })
+            
+            current_min += 5
+            if current_min >= 60:
+                current_min = 0
+                current_hour += 1
     
     return pd.DataFrame(results)
