@@ -134,6 +134,47 @@
 
 ---
 
+## Predicted POSTED Module (DONE)
+
+**Implemented**: [src/processors/posted_aggregates.py](src/processors/posted_aggregates.py) generates predicted POSTED from historical aggregates.
+
+**Purpose**: Predicted POSTED enables:
+  1. **Live comparison**: "We predicted POSTED = X, we observe POSTED = Y"
+  2. **Building trust**: Show accuracy of predictions in real-time
+  3. **Live streaming content**: Watch predictions perform in real-time
+
+**Features**:
+  - **Aggregation**: (entity_code, dategroupid, hour) → median POSTED
+  - **Fallback strategy**: If exact match not found, tries:
+    1. (entity, dategroupid) → median across hours
+    2. (entity, hour) → median across dategroupids
+    3. (entity) → median across all
+    4. (park_code, hour) → park-level
+  - **Storage**: Saves to `aggregates/posted_aggregates.parquet` for fast lookup
+  - **Batch generation**: Get predicted POSTED for all hours of a day
+
+**Usage**:
+  ```python
+  from processors.posted_aggregates import get_predicted_posted
+  
+  # Get predicted POSTED for a specific time
+  predicted = get_predicted_posted(
+      entity_code="MK101",
+      park_date=date(2026, 6, 15),
+      hour=14,  # 2 PM
+      output_base=output_base,
+  )
+  ```
+
+**Build script**: [scripts/build_posted_aggregates.py](scripts/build_posted_aggregates.py)
+  - Scans all historical fact tables
+  - Aggregates POSTED by (entity, dategroupid, hour)
+  - Saves to Parquet for fast lookup
+
+**Future**: Forecast script that generates both predicted ACTUAL and predicted POSTED for future dates.
+
+---
+
 ## Next Steps (from attraction-io alignment)
 
 See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the legacy pipeline summary and full mapping. For modeling, ACTUAL curves, forecast, live inference, and WTI: [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).
