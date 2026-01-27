@@ -143,6 +143,32 @@ python src/build_entity_index.py --output-base "D:\Path"
 
 **Note**: The index updates automatically during ETL runs, so a full rebuild is only needed for initial creation or recovery. See [docs/ENTITY_INDEX.md](../docs/ENTITY_INDEX.md).
 
+### `check_prerequisites.py`
+
+Checks if all prerequisites are met for running the modeling pipeline:
+- Required Python packages (pandas, xgboost, sklearn, etc.)
+- Trained models (with-POSTED and without-POSTED)
+- Posted aggregates
+- Entity index
+- Versioned park hours (optional)
+
+Optionally installs missing packages.
+
+**Run**:
+
+```powershell
+# Check prerequisites
+python scripts/check_prerequisites.py
+
+# Check and install missing packages
+python scripts/check_prerequisites.py --install-missing
+
+# Custom output base
+python scripts/check_prerequisites.py --output-base "D:\\Path"
+```
+
+**Options**: `--output-base`, `--install-missing` (install missing packages), `--min-models` (default: 1).
+
 ### `test_modeling_pipeline.py`
 
 Tests the complete modeling pipeline (forecast, backfill, WTI) with a small subset of entities and dates. Useful for validating the pipeline before running on full datasets.
