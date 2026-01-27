@@ -622,7 +622,7 @@ def add_park_hours(
     if output_base is not None:
         try:
             from processors.park_hours_versioning import (
-                get_park_hours_for_date,
+                build_park_hours_lookup_table,
                 load_versioned_table,
             )
             versioned_df = load_versioned_table(output_base)
@@ -648,50 +648,53 @@ def add_park_hours(
         else:
             park_tz_str = "America/New_York"
         
-        # Get park hours for each unique (park_date, park_code) combination
-        unique_dates = df[["park_date", "park_code"]].drop_duplicates()
-        hours_list = []
+        # Build (park_date, park_code) -> park hours lookup in one vectorized pass.
+        # Park hours are per park, not per entity; one merge serves all rows.
+        keys_df = df[["park_date", "park_code"]].drop_duplicates()
+        hours_lookup = build_park_hours_lookup_table(
+            versioned_df, keys_df, as_of=as_of, logger=logger
+        )
         
-        for _, row in unique_dates.iterrows():
-            park_date = pd.to_datetime(row["park_date"], errors="coerce").date()
-            if pd.isna(park_date):
-                continue
-            park_code = str(row["park_code"]).upper().strip()
-            
-            hours = get_park_hours_for_date(
-                park_date,
-                park_code,
-                versioned_df,
-                as_of=as_of,
-                logger=logger,
+        if hours_lookup.empty:
+            df["_opening_time_str"] = None
+            df["_closing_time_str"] = None
+            df["pred_emh_morning"] = False
+            df["pred_emh_evening"] = False
+            missing_count = len(df)
+            missing_samples = df[["park_date", "park_code"]].drop_duplicates().head(5)
+            error_msg = (
+                f"Missing park hours for {missing_count} rows! "
+                f"Lookup returned no rows.\n"
+                f"Sample (park_date, park_code):\n{missing_samples.to_string()}"
             )
-            if hours:
-                hours_list.append({
-                    "park_date": park_date,
-                    "park_code": park_code,
-                    "_park_hours": hours,
-                })
+            if logger:
+                logger.error(error_msg)
+            raise ValueError(error_msg)
         
-        # Create lookup DataFrame and merge (much faster than apply)
-        if hours_list:
-            hours_lookup = pd.DataFrame(hours_list)
-            # Ensure park_date is date type for merge
-            df["park_date_for_merge"] = pd.to_datetime(df["park_date"], errors="coerce").dt.date
-            df = df.merge(
-                hours_lookup,
-                left_on=["park_date_for_merge", "park_code"],
-                right_on=["park_date", "park_code"],
-                how="left",
-            )
-            df = df.drop(columns=["park_date_for_merge"])
-        else:
-            df["_park_hours"] = None
+        # Merge via normalized keys so (park_date, park_code) match lookup
+        df["_pd"] = pd.to_datetime(df["park_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        df["_pc"] = df["park_code"].astype(str).str.upper().str.strip()
+        hours_for_merge = hours_lookup.rename(columns={
+            "opening_time": "_opening_time_str",
+            "closing_time": "_closing_time_str",
+            "emh_morning": "pred_emh_morning",
+            "emh_evening": "pred_emh_evening",
+            "park_date": "_lk_date",
+            "park_code": "_lk_pc",
+        })[["_lk_date", "_lk_pc", "_opening_time_str", "_closing_time_str", "pred_emh_morning", "pred_emh_evening"]]
+        df = df.merge(
+            hours_for_merge,
+            left_on=["_pd", "_pc"],
+            right_on=["_lk_date", "_lk_pc"],
+            how="left",
+        )
+        df = df.drop(columns=["_pd", "_pc", "_lk_date", "_lk_pc"], errors="ignore")
         
         # Check for missing park hours - this should never happen!
-        missing_hours = df["_park_hours"].isna() | (df["_park_hours"] == None)
+        missing_hours = df["_opening_time_str"].isna() | (df["_closing_time_str"].isna())
         if missing_hours.any():
             missing_count = missing_hours.sum()
-            missing_samples = df[missing_hours][["park_date", "park_code"]].drop_duplicates().head(5)
+            missing_samples = df.loc[missing_hours, ["park_date", "park_code"]].drop_duplicates().head(5)
             error_msg = (
                 f"Missing park hours for {missing_count} rows! "
                 f"This indicates a data quality issue.\n"
@@ -701,35 +704,9 @@ def add_park_hours(
                 logger.error(error_msg)
             raise ValueError(error_msg)
         
-        # Extract times from dict (vectorized)
-        # At this point, all _park_hours should be dicts with opening_time and closing_time
-        df["_opening_time_str"] = df["_park_hours"].apply(
-            lambda h: h.get("opening_time") if isinstance(h, dict) else None
-        )
-        df["_closing_time_str"] = df["_park_hours"].apply(
-            lambda h: h.get("closing_time") if isinstance(h, dict) else None
-        )
-        
-        # Verify opening/closing times are present
-        missing_opening = df["_opening_time_str"].isna() | (df["_opening_time_str"] == "")
-        missing_closing = df["_closing_time_str"].isna() | (df["_closing_time_str"] == "")
-        if missing_opening.any() or missing_closing.any():
-            missing_opening_count = missing_opening.sum()
-            missing_closing_count = missing_closing.sum()
-            error_msg = (
-                f"Missing opening_time for {missing_opening_count} rows, "
-                f"missing closing_time for {missing_closing_count} rows! "
-                f"This indicates a data quality issue in park hours."
-            )
-            if logger:
-                logger.error(error_msg)
-            raise ValueError(error_msg)
-        df["pred_emh_morning"] = df["_park_hours"].apply(
-            lambda h: h.get("emh_morning", False) if isinstance(h, dict) else False
-        )
-        df["pred_emh_evening"] = df["_park_hours"].apply(
-            lambda h: h.get("emh_evening", False) if isinstance(h, dict) else False
-        )
+        # pred_emh_* already set from lookup; ensure bool
+        df["pred_emh_morning"] = df["pred_emh_morning"].fillna(False).astype(bool)
+        df["pred_emh_evening"] = df["pred_emh_evening"].fillna(False).astype(bool)
         
         # Parse times - vectorized approach for HH:MM format (most common)
         # Convert park_date to datetime64[ns] first (should already be, but ensure)

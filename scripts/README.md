@@ -64,6 +64,18 @@ powershell -ExecutionPolicy Bypass -File scripts/run_queue_times_loop.ps1 -Inter
 
 **Troubleshooting:** If the loop was stopped by closing the window, delete `state/processing_queue_times.lock` under your output base before starting again. Check `output_base/logs/get_tp_wait_time_data_*.log` for errors.
 
+**Stream Deck button** — To start the queue-times loop from a Stream Deck button (window stays open, use Ctrl+C to stop):
+
+1. Add an **Open** action.
+2. **App / File:** full path to `scripts\start_queue_times_stream_deck.bat`  
+   Example: `D:\GitHub\hazeydata\theme-park-crowd-report\scripts\start_queue_times_stream_deck.bat`
+3. **Arguments:** leave blank.
+4. **Start in:** leave blank.
+
+**Option B — if no window appears:** Use **Open** with **App / File:** `cmd.exe` and **Arguments:** `/k "D:\GitHub\hazeydata\theme-park-crowd-report\scripts\start_queue_times_stream_deck.bat"` (use your actual path). That forces a visible cmd window that runs the same script.
+
+The `.bat` uses `start "Queue-Times Loop" powershell ...` so a titled PowerShell window should appear. The script uses Python 3.11 when available. If Python isn’t found, edit `scripts\stream_deck_queue_times.ps1` and set `$PythonExe` to the full path to your `python.exe`.
+
 ### `validate_wait_times.py`
 
 Validates wait time fact table CSVs under `fact_tables/clean/`:

@@ -18,12 +18,17 @@ USAGE
 ================================================================================
   from processors.park_hours_versioning import (
       get_park_hours_for_date,
+      build_park_hours_lookup_table,
       create_official_version,
       create_predicted_version_from_donor,
   )
   
   # Get hours for a date (uses best available version)
   hours = get_park_hours_for_date(park_date, park_code, dimparkhours_versioned, as_of=now)
+  
+  # Batch: build (park_date, park_code) -> hours lookup for many keys at once
+  # Park hours are per park, not per entity; use this for feature engineering.
+  lookup = build_park_hours_lookup_table(versioned_df, keys_df, as_of=now)
   
   # Create official version when syncing from S3
   create_official_version(park_date, park_code, opening_time, closing_time, ...)
@@ -188,6 +193,113 @@ def get_park_hours_for_date(
     }
     
     return result
+
+
+def build_park_hours_lookup_table(
+    versioned_df: pd.DataFrame,
+    keys_df: pd.DataFrame,
+    as_of: Optional[datetime] = None,
+    logger: Optional[logging.Logger] = None,
+) -> pd.DataFrame:
+    """
+    Build a (park_date, park_code) -> park hours lookup table in one vectorized pass.
+    
+    Park hours are per (park_date, park_code), not per entity. This function
+    takes the set of (park_date, park_code) keys needed and returns a lookup
+    DataFrame with one row per key and columns: park_date, park_code,
+    opening_time, closing_time, emh_morning, emh_evening.
+    
+    Uses the same priority and temporal logic as get_park_hours_for_date, but
+    operates in bulk via merges and groupby, so it is O(unique keys + versioned rows)
+    instead of O(unique keys * cost_per_lookup).
+    
+    Args:
+        versioned_df: Versioned park hours DataFrame (from load_versioned_table)
+        keys_df: DataFrame with columns park_date, park_code (e.g. from
+                 df[["park_date", "park_code"]].drop_duplicates())
+        as_of: Timestamp for version selection (default: now UTC)
+        logger: Optional logger
+    
+    Returns:
+        DataFrame with columns park_date, park_code, opening_time, closing_time,
+        emh_morning, emh_evening. Index reset. Missing hours get DEFAULT_DATETIME_BLANK.
+    """
+    if versioned_df is None or versioned_df.empty or keys_df is None or keys_df.empty:
+        return pd.DataFrame(columns=[
+            "park_date", "park_code", "opening_time", "closing_time",
+            "emh_morning", "emh_evening",
+        ])
+    
+    if as_of is None:
+        as_of = datetime.now(ZoneInfo("UTC"))
+    
+    # Normalize keys to (park_date_str, park_code_upper) for merge
+    keys = keys_df[["park_date", "park_code"]].drop_duplicates()
+    keys["_park_date"] = pd.to_datetime(keys["park_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    keys["_park_code"] = keys["park_code"].astype(str).str.upper().str.strip()
+    keys_norm = keys[["_park_date", "_park_code"]].drop_duplicates()
+    
+    # Normalize versioned_df for merge
+    v = versioned_df.copy()
+    v["_park_date"] = v["park_date"].astype(str).str.strip()
+    v["_park_code"] = v["park_code"].astype(str).str.upper().str.strip()
+    
+    # Merge: each key gets all matching versioned rows
+    merged = keys_norm.merge(
+        v,
+        on=["_park_date", "_park_code"],
+        how="left",
+    )
+    
+    if merged.empty:
+        out = keys_norm.rename(columns={"_park_date": "park_date", "_park_code": "park_code"})
+        out["opening_time"] = DEFAULT_DATETIME_BLANK
+        out["closing_time"] = DEFAULT_DATETIME_BLANK
+        out["emh_morning"] = False
+        out["emh_evening"] = False
+        return out[["park_date", "park_code", "opening_time", "closing_time", "emh_morning", "emh_evening"]]
+    
+    # Temporal validity
+    valid = (
+        (merged["valid_from"] <= as_of) &
+        (merged["valid_until"].isna() | (merged["valid_until"] > as_of))
+    )
+    merged = merged.loc[valid]
+    
+    if merged.empty:
+        out = keys_norm.rename(columns={"_park_date": "park_date", "_park_code": "park_code"})
+        out["opening_time"] = DEFAULT_DATETIME_BLANK
+        out["closing_time"] = DEFAULT_DATETIME_BLANK
+        out["emh_morning"] = False
+        out["emh_evening"] = False
+        return out[["park_date", "park_code", "opening_time", "closing_time", "emh_morning", "emh_evening"]]
+    
+    # Priority and recency: same as get_park_hours_for_date
+    merged["_priority"] = merged["version_type"].map(VERSION_TYPES).fillna(99)
+    merged = merged.sort_values(
+        by=["_park_date", "_park_code", "_priority", "created_at"],
+        ascending=[True, True, True, False],
+    )
+    
+    # Keep first (best) per (park_date, park_code)
+    best = merged.drop_duplicates(subset=["_park_date", "_park_code"], keep="first")
+    
+    # Output columns; fill blank opening/closing with default
+    ot = best["opening_time"].astype(str)
+    ct = best["closing_time"].astype(str)
+    out = best[["_park_date", "_park_code"]].rename(columns={"_park_date": "park_date", "_park_code": "park_code"})
+    out["opening_time"] = ot.where(
+        ot.notna() & (ot.str.strip() != "") & (ot.str.strip().str.lower() != "nan"),
+        DEFAULT_DATETIME_BLANK,
+    )
+    out["closing_time"] = ct.where(
+        ct.notna() & (ct.str.strip() != "") & (ct.str.strip().str.lower() != "nan"),
+        DEFAULT_DATETIME_BLANK,
+    )
+    out["emh_morning"] = best["emh_morning"].fillna(False).astype(bool)
+    out["emh_evening"] = best["emh_evening"].fillna(False).astype(bool)
+    
+    return out.reset_index(drop=True)
 
 
 # =============================================================================
