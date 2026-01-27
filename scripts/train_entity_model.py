@@ -80,6 +80,11 @@ def main() -> None:
         action="store_true",
         help="Skip encoding step (assumes data is already encoded)",
     )
+    ap.add_argument(
+        "--sample",
+        type=int,
+        help="Use only first N rows for testing (speeds up training significantly)",
+    )
     args = ap.parse_args()
 
     base = args.output_base.resolve()
@@ -102,6 +107,12 @@ def main() -> None:
         sys.exit(1)
     
     logger.info(f"Loaded {len(df):,} rows")
+    
+    # Sample data if requested (for faster testing)
+    if args.sample and args.sample > 0:
+        original_len = len(df)
+        df = df.head(args.sample).copy()
+        logger.info(f"Sampled to {len(df):,} rows (from {original_len:,}) for faster testing")
 
     # Add features
     logger.info("Adding features...")

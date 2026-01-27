@@ -36,6 +36,10 @@ theme-park-crowd-report/
 
 See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed folder organization.
 
+### Website (Figma → live)
+
+The [**web/**](web/) folder holds a static site for the project home page. Use your Figma design → HTML/CSS export, then deploy. See [web/FIGMA_TO_HTML.md](web/FIGMA_TO_HTML.md) and [web/DEPLOY.md](web/DEPLOY.md).
+
 ## Setup
 
 ### 1. Create and Activate Virtual Environment

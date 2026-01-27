@@ -628,7 +628,7 @@ def add_park_hours(
         
         # Get park hours for each unique (park_date, park_code) combination
         unique_dates = df[["park_date", "park_code"]].drop_duplicates()
-        hours_dict = {}
+        hours_list = []
         
         for _, row in unique_dates.iterrows():
             park_date = pd.to_datetime(row["park_date"], errors="coerce").date()
@@ -644,41 +644,87 @@ def add_park_hours(
                 logger=logger,
             )
             if hours:
-                hours_dict[(park_date, park_code)] = hours
+                hours_list.append({
+                    "park_date": park_date,
+                    "park_code": park_code,
+                    "_park_hours": hours,
+                })
         
-        # Merge hours into df
-        def get_hours(row):
-            park_date = pd.to_datetime(row["park_date"], errors="coerce").date()
-            if pd.isna(park_date):
-                return None
-            park_code = str(row["park_code"]).upper().strip()
-            return hours_dict.get((park_date, park_code))
+        # Create lookup DataFrame and merge (much faster than apply)
+        if hours_list:
+            hours_lookup = pd.DataFrame(hours_list)
+            # Ensure park_date is date type for merge
+            df["park_date_for_merge"] = pd.to_datetime(df["park_date"], errors="coerce").dt.date
+            df = df.merge(
+                hours_lookup,
+                left_on=["park_date_for_merge", "park_code"],
+                right_on=["park_date", "park_code"],
+                how="left",
+            )
+            df = df.drop(columns=["park_date_for_merge"])
+        else:
+            df["_park_hours"] = None
         
-        df["_park_hours"] = df.apply(get_hours, axis=1)
-        
-        # Extract and parse times
+        # Extract times from dict (vectorized)
         df["_opening_time_str"] = df["_park_hours"].apply(
-            lambda h: h.get("opening_time") if h else None
+            lambda h: h.get("opening_time") if isinstance(h, dict) else None
         )
         df["_closing_time_str"] = df["_park_hours"].apply(
-            lambda h: h.get("closing_time") if h else None
+            lambda h: h.get("closing_time") if isinstance(h, dict) else None
         )
         df["pred_emh_morning"] = df["_park_hours"].apply(
-            lambda h: h.get("emh_morning", False) if h else False
+            lambda h: h.get("emh_morning", False) if isinstance(h, dict) else False
         )
         df["pred_emh_evening"] = df["_park_hours"].apply(
-            lambda h: h.get("emh_evening", False) if h else False
+            lambda h: h.get("emh_evening", False) if isinstance(h, dict) else False
         )
         
-        # Parse times
-        opening_dt = df.apply(
-            lambda row: _parse_park_time(row["_opening_time_str"], row["park_date"], park_tz_str),
-            axis=1,
-        )
-        closing_dt = df.apply(
-            lambda row: _parse_park_time(row["_closing_time_str"], row["park_date"], park_tz_str),
-            axis=1,
-        )
+        # Parse times - vectorized approach for HH:MM format (most common)
+        park_dates_dt = pd.to_datetime(df["park_date"], errors="coerce")
+        tz = ZoneInfo(park_tz_str)
+        
+        # Vectorized parsing for HH:MM format
+        def parse_time_vectorized(time_str_series, park_dates):
+            """Parse HH:MM times vectorized."""
+            result = []
+            for time_str, park_date in zip(time_str_series, park_dates):
+                if pd.isna(time_str) or time_str is None or pd.isna(park_date):
+                    result.append(None)
+                    continue
+                
+                time_str = str(time_str).strip()
+                if not time_str:
+                    result.append(None)
+                    continue
+                
+                # Try HH:MM format first (most common)
+                if ":" in time_str and len(time_str.split(":")) == 2:
+                    try:
+                        parts = time_str.split(":")
+                        hour = int(parts[0])
+                        minute = int(parts[1])
+                        if 0 <= hour <= 23 and 0 <= minute <= 59:
+                            dt = pd.Timestamp(
+                                year=park_date.year,
+                                month=park_date.month,
+                                day=park_date.day,
+                                hour=hour,
+                                minute=minute,
+                                tz=tz,
+                            )
+                            result.append(dt)
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Fallback to full parser for ISO8601 or other formats
+                parsed = _parse_park_time(time_str, park_date, park_tz_str)
+                result.append(parsed)
+            
+            return pd.Series(result, index=time_str_series.index)
+        
+        opening_dt = parse_time_vectorized(df["_opening_time_str"], park_dates_dt)
+        closing_dt = parse_time_vectorized(df["_closing_time_str"], park_dates_dt)
         
         # Calculate features
         observed_dt = pd.to_datetime(df["observed_at"], errors="coerce", utc=True)
