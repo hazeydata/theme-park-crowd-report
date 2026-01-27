@@ -8,11 +8,18 @@ Standalone utility scripts that can be run independently of the main pipeline.
 
 Registers the **5 AM**, **6 AM**, and **7 AM Eastern** Windows scheduled tasks.
 
+**IMPORTANT: Must be run as Administrator** to register scheduled tasks.
+
 **Run once** (or after changing Python path / project root):
 
+1. **Right-click PowerShell** and select **"Run as Administrator"**
+2. Navigate to the project directory
+3. Run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 ```
+
+If you get "Access is denied" errors, you need Administrator privileges. The script will continue trying to register remaining tasks even if some fail, and will warn you if it detects you're not running as Administrator.
 
 Creates:
 - **ThemeParkWaitTimeETL_5am** — Daily at 5:00 AM (wait-time ETL, primary)
