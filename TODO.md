@@ -42,6 +42,23 @@
 
 ---
 
+## Feature Engineering Module (DONE)
+
+**Implemented**: [src/processors/features.py](src/processors/features.py) adds modeling features to fact rows:
+  - `pred_mins_since_6am`: Minutes since 6am from `observed_at` (6am rule: if hour < 6, add 1440)
+  - `pred_dategroupid`: Join to `dimdategroupid` on `park_date`
+  - `pred_season`, `pred_season_year`: Join to `dimseason` on `park_date`
+  - `wgt_geo_decay`: Geometric decay weight `0.5^(days_since_observed / 730)` for training
+  - `park_date`: Operational date (6am rule, uses timezone from `observed_at`)
+  - `park_code`: Derived from `entity_code` prefix
+  - `observed_wait_time`: Target variable (from `wait_time_minutes`)
+
+**Usage**: `add_features(df, output_base)` takes fact rows and returns feature-rich DataFrame ready for encoding and modeling.
+
+**Future**: `add_park_hours` (needs dimparkhours → donor bridge). Encoding is a separate step (categorical → numeric for ML).
+
+---
+
 ## Next Steps (from attraction-io alignment)
 
 See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the legacy pipeline summary and full mapping. For modeling, ACTUAL curves, forecast, live inference, and WTI: [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).
