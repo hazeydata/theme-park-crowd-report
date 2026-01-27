@@ -95,6 +95,45 @@
 
 ---
 
+## Training Module (DONE)
+
+**Implemented**: [src/processors/training.py](src/processors/training.py) trains XGBoost models to predict ACTUAL wait times.
+
+**Features**:
+  - **Two models**: 
+    - **With-POSTED**: ACTUAL ~ POSTED + features (for backfill and live inference)
+    - **Without-POSTED**: ACTUAL ~ features only (for forecast)
+  - **Chronological split**: Train/val/test by park_date to avoid temporal leakage
+  - **XGBoost**: Gradient boosted trees with early stopping
+  - **Evaluation metrics**: MAE, RMSE, MAPE, R², correlation
+  - **Model persistence**: Saves models and metadata to `models/{entity_code}/`
+  - **Entity index integration**: Marks entities as modeled after training
+
+**Usage**:
+  ```python
+  from processors.training import train_entity_model
+  
+  # After features and encoding
+  models, metrics = train_entity_model(
+      df_encoded,
+      entity_code,
+      output_base,
+      train_ratio=0.7,
+      val_ratio=0.15,
+  )
+  ```
+
+**Training script**: [scripts/train_entity_model.py](scripts/train_entity_model.py)
+  - Loads entity data
+  - Adds features
+  - Encodes categoricals
+  - Trains both models
+  - Marks entity as modeled
+
+**Future**: Hyperparameter tuning, quantile regression, SHAP analysis.
+
+---
+
 ## Next Steps (from attraction-io alignment)
 
 See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the legacy pipeline summary and full mapping. For modeling, ACTUAL curves, forecast, live inference, and WTI: [docs/MODELING_AND_WTI_METHODOLOGY.md](docs/MODELING_AND_WTI_METHODOLOGY.md).

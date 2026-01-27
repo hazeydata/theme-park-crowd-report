@@ -13,3 +13,7 @@ python-dotenv>=1.0.0
 
 # Optional: For better data validation
 pydantic>=2.5.0
+
+# Machine learning
+xgboost>=2.0.0
+scikit-learn>=1.3.0
