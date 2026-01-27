@@ -434,6 +434,55 @@ def add_park_code(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _parse_park_time(time_str, park_date_str, park_tz_str):
+    """
+    Parse time string (ISO8601 or HH:MM) to datetime in park timezone.
+    
+    Helper function for add_park_hours.
+    """
+    if pd.isna(time_str) or time_str is None:
+        return None
+    
+    time_str = str(time_str).strip()
+    if not time_str:
+        return None
+    
+    # Try parsing as ISO8601 datetime first
+    try:
+        dt = pd.to_datetime(time_str, errors="raise")
+        if dt.tz is not None:
+            # Already timezone-aware, convert to park timezone
+            return dt
+        # Not timezone-aware, assume it's in park timezone
+        tz = ZoneInfo(park_tz_str)
+        return dt.tz_localize(tz)
+    except (ValueError, TypeError):
+        pass
+    
+    # Try parsing as HH:MM or HH:MM:SS
+    try:
+        parts = time_str.split(":")
+        if len(parts) >= 2:
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                # Combine with park_date
+                park_date = pd.to_datetime(park_date_str)
+                tz = ZoneInfo(park_tz_str)
+                return pd.Timestamp(
+                    year=park_date.year,
+                    month=park_date.month,
+                    day=park_date.day,
+                    hour=hour,
+                    minute=minute,
+                    tz=tz,
+                )
+    except (ValueError, TypeError, IndexError):
+        pass
+    
+    return None
+
+
 def add_observed_wait_time(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add observed_wait_time: target variable from wait_time_minutes.
@@ -452,18 +501,75 @@ def add_observed_wait_time(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
-# MAIN FEATURE ADDITION FUNCTION
+# PARK HOURS FEATURES
 # =============================================================================
+
+def _parse_park_time(time_str, park_date_str, park_tz_str):
+    """
+    Parse time string (ISO8601 or HH:MM) to datetime in park timezone.
+    
+    Helper function for add_park_hours.
+    """
+    if pd.isna(time_str) or time_str is None:
+        return None
+    
+    time_str = str(time_str).strip()
+    if not time_str:
+        return None
+    
+    # Try parsing as ISO8601 datetime first
+    try:
+        dt = pd.to_datetime(time_str, errors="raise")
+        if dt.tz is not None:
+            # Already timezone-aware, convert to park timezone
+            return dt
+        # Not timezone-aware, assume it's in park timezone
+        tz = ZoneInfo(park_tz_str)
+        return dt.tz_localize(tz)
+    except (ValueError, TypeError):
+        pass
+    
+    # Try parsing as HH:MM or HH:MM:SS
+    try:
+        parts = time_str.split(":")
+        if len(parts) >= 2:
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                # Combine with park_date
+                park_date = pd.to_datetime(park_date_str)
+                tz = ZoneInfo(park_tz_str)
+                return pd.Timestamp(
+                    year=park_date.year,
+                    month=park_date.month,
+                    day=park_date.day,
+                    hour=hour,
+                    minute=minute,
+                    tz=tz,
+                )
+    except (ValueError, TypeError, IndexError):
+        pass
+    
+    return None
+
 
 def add_park_hours(
     df: pd.DataFrame,
     dimparkhours: Optional[pd.DataFrame],
+    output_base: Optional[Path] = None,
+    as_of: Optional[datetime] = None,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
     """
     Add park hours features: mins_since_park_open, park open/close hours, EMH flags.
     
-    Joins to dimparkhours on (park_date, park_code) and calculates:
+    Uses versioned park hours table if available (dimparkhours_with_donor.csv), otherwise
+    falls back to flat dimparkhours.csv. The versioned table provides:
+      - Official hours (from S3 sync)
+      - Predicted hours (from donor day imputation)
+      - Change tracking and confidence scores
+    
+    Joins to park hours on (park_date, park_code) and calculates:
       - pred_mins_since_park_open: Minutes since park opening time
       - pred_park_open_hour: Opening hour (0-23)
       - pred_park_close_hour: Closing hour (0-23)
@@ -473,7 +579,9 @@ def add_park_hours(
     
     Args:
         df: DataFrame with park_date, park_code, observed_at columns
-        dimparkhours: dimparkhours DataFrame (park_date, park_code, opening_time, closing_time, emh_*)
+        dimparkhours: Flat dimparkhours DataFrame (fallback if versioned table not available)
+        output_base: Pipeline output base directory (for loading versioned table)
+        as_of: Timestamp for version selection (default: now)
         logger: Optional logger
     
     Returns:
@@ -481,6 +589,116 @@ def add_park_hours(
     """
     df = df.copy()
     
+    # Try to use versioned table first
+    versioned_df = None
+    use_versioned = False
+    if output_base is not None:
+        try:
+            from processors.park_hours_versioning import (
+                get_park_hours_for_date,
+                load_versioned_table,
+            )
+            versioned_df = load_versioned_table(output_base)
+            if versioned_df is not None and not versioned_df.empty:
+                use_versioned = True
+                if logger:
+                    logger.debug("Using versioned park hours table")
+        except ImportError:
+            pass
+        except Exception as e:
+            if logger:
+                logger.debug(f"Could not load versioned table: {e}, using flat table")
+    
+    # Use versioned table if available
+    if use_versioned and versioned_df is not None:
+        if as_of is None:
+            as_of = datetime.now(ZoneInfo("UTC"))
+        
+        # Get park timezone from park_code
+        if len(df) > 0 and "park_code" in df.columns:
+            first_park_code = str(df["park_code"].iloc[0]).lower().strip()
+            park_tz_str = PARK_TIMEZONE_MAP.get(first_park_code, "America/New_York")
+        else:
+            park_tz_str = "America/New_York"
+        
+        # Get park hours for each unique (park_date, park_code) combination
+        unique_dates = df[["park_date", "park_code"]].drop_duplicates()
+        hours_dict = {}
+        
+        for _, row in unique_dates.iterrows():
+            park_date = pd.to_datetime(row["park_date"], errors="coerce").date()
+            if pd.isna(park_date):
+                continue
+            park_code = str(row["park_code"]).upper().strip()
+            
+            hours = get_park_hours_for_date(
+                park_date,
+                park_code,
+                versioned_df,
+                as_of=as_of,
+                logger=logger,
+            )
+            if hours:
+                hours_dict[(park_date, park_code)] = hours
+        
+        # Merge hours into df
+        def get_hours(row):
+            park_date = pd.to_datetime(row["park_date"], errors="coerce").date()
+            if pd.isna(park_date):
+                return None
+            park_code = str(row["park_code"]).upper().strip()
+            return hours_dict.get((park_date, park_code))
+        
+        df["_park_hours"] = df.apply(get_hours, axis=1)
+        
+        # Extract and parse times
+        df["_opening_time_str"] = df["_park_hours"].apply(
+            lambda h: h.get("opening_time") if h else None
+        )
+        df["_closing_time_str"] = df["_park_hours"].apply(
+            lambda h: h.get("closing_time") if h else None
+        )
+        df["pred_emh_morning"] = df["_park_hours"].apply(
+            lambda h: h.get("emh_morning", False) if h else False
+        )
+        df["pred_emh_evening"] = df["_park_hours"].apply(
+            lambda h: h.get("emh_evening", False) if h else False
+        )
+        
+        # Parse times
+        opening_dt = df.apply(
+            lambda row: _parse_park_time(row["_opening_time_str"], row["park_date"], park_tz_str),
+            axis=1,
+        )
+        closing_dt = df.apply(
+            lambda row: _parse_park_time(row["_closing_time_str"], row["park_date"], park_tz_str),
+            axis=1,
+        )
+        
+        # Calculate features
+        observed_dt = pd.to_datetime(df["observed_at"], errors="coerce", utc=True)
+        if observed_dt.dt.tz is None:
+            observed_dt = observed_dt.dt.tz_localize("UTC")
+        observed_dt = observed_dt.dt.tz_convert(park_tz_str)
+        
+        mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
+        df["pred_mins_since_park_open"] = mins_since_open.astype("Float64")
+        df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
+        df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
+        
+        # Calculate hours_open (handle overnight)
+        hours_open = (closing_dt - opening_dt).dt.total_seconds() / 3600.0
+        mask_overnight = closing_dt < opening_dt
+        if mask_overnight.any():
+            hours_open.loc[mask_overnight] = hours_open.loc[mask_overnight] + 24.0
+        df["pred_park_hours_open"] = hours_open.astype("Float64")
+        
+        # Cleanup temp columns
+        df = df.drop(columns=["_park_hours", "_opening_time_str", "_closing_time_str"], errors="ignore")
+        
+        return df
+    
+    # Fallback to flat dimparkhours if versioned table not available
     if dimparkhours is None or dimparkhours.empty:
         if logger:
             logger.warning("dimparkhours not available; park hours features will be null")
@@ -560,52 +778,6 @@ def add_park_hours(
         how="left",
     )
     
-    # Parse opening_time and closing_time
-    # They could be ISO8601 datetime strings or simple HH:MM time strings
-    def parse_park_time(time_str, park_date_str, park_tz_str):
-        """Parse time string (ISO8601 or HH:MM) to datetime in park timezone."""
-        if pd.isna(time_str) or time_str is None:
-            return None
-        
-        time_str = str(time_str).strip()
-        if not time_str:
-            return None
-        
-        # Try parsing as ISO8601 datetime first
-        try:
-            dt = pd.to_datetime(time_str, errors="raise")
-            if dt.tz is not None:
-                # Already timezone-aware, convert to park timezone
-                return dt
-            # Not timezone-aware, assume it's in park timezone
-            tz = ZoneInfo(park_tz_str)
-            return dt.tz_localize(tz)
-        except (ValueError, TypeError):
-            pass
-        
-        # Try parsing as HH:MM or HH:MM:SS
-        try:
-            parts = time_str.split(":")
-            if len(parts) >= 2:
-                hour = int(parts[0])
-                minute = int(parts[1])
-                if 0 <= hour <= 23 and 0 <= minute <= 59:
-                    # Combine with park_date
-                    park_date = pd.to_datetime(park_date_str)
-                    tz = ZoneInfo(park_tz_str)
-                    return pd.Timestamp(
-                        year=park_date.year,
-                        month=park_date.month,
-                        day=park_date.day,
-                        hour=hour,
-                        minute=minute,
-                        tz=tz,
-                    )
-        except (ValueError, TypeError, IndexError):
-            pass
-        
-        return None
-    
     # Get park timezone from park_code
     # Each entity belongs to one park, so all rows should have same park_code
     if len(df) > 0 and "park_code" in df.columns:
@@ -616,11 +788,11 @@ def add_park_hours(
     
     # Parse opening and closing times
     opening_dt = merged.apply(
-        lambda row: parse_park_time(row[open_col], row["_park_date_norm"], park_tz_str),
+        lambda row: _parse_park_time(row[open_col], row["_park_date_norm"], park_tz_str),
         axis=1,
     )
     closing_dt = merged.apply(
-        lambda row: parse_park_time(row[close_col], row["_park_date_norm"], park_tz_str),
+        lambda row: _parse_park_time(row[close_col], row["_park_date_norm"], park_tz_str),
         axis=1,
     )
     
@@ -731,6 +903,6 @@ def add_features(
     
     # Add park hours features
     if include_park_hours:
-        df = add_park_hours(df, dimparkhours, logger)
+        df = add_park_hours(df, dimparkhours, output_base=output_base, logger=logger)
     
     return df

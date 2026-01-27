@@ -54,6 +54,17 @@ from botocore.exceptions import ClientError, ResponseStreamingError
 
 from utils import get_output_base
 
+# Import versioning module (optional - only if versioned table exists)
+try:
+    from processors.park_hours_versioning import (
+        create_official_version,
+        load_versioned_table,
+        save_versioned_table,
+    )
+    VERSIONING_AVAILABLE = True
+except ImportError:
+    VERSIONING_AVAILABLE = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -228,6 +239,82 @@ def main() -> None:
             pass
         logger.error(f"Failed to write {out_path}: {e}")
         sys.exit(1)
+
+    # ----- STEP 5: Update versioned table (if it exists) -----
+    if VERSIONING_AVAILABLE:
+        try:
+            versioned_df = load_versioned_table(base)
+            if versioned_df is None:
+                logger.info("Versioned table not found; skipping version creation (run migrate_park_hours_to_versioned.py first)")
+            else:
+                logger.info("Updating versioned table with new official hours...")
+                
+                # Find date and park columns
+                date_col = None
+                for col in ["park_date", "date", "park_day_id"]:
+                    if col in combined.columns:
+                        date_col = col
+                        break
+                
+                park_col = None
+                for col in ["park_code", "park", "code"]:
+                    if col in combined.columns:
+                        park_col = col
+                        break
+                
+                open_col = None
+                for col in ["opening_time", "open", "open_time"]:
+                    if col in combined.columns:
+                        open_col = col
+                        break
+                
+                close_col = None
+                for col in ["closing_time", "close", "close_time"]:
+                    if col in combined.columns:
+                        close_col = col
+                        break
+                
+                if date_col and park_col and open_col and close_col:
+                    changes_count = 0
+                    for idx, row in combined.iterrows():
+                        try:
+                            park_date = pd.to_datetime(row[date_col], errors="coerce").date()
+                            if pd.isna(park_date):
+                                continue
+                            
+                            park_code = str(row[park_col]).upper().strip()
+                            opening_time = str(row[open_col]).strip()
+                            closing_time = str(row[close_col]).strip()
+                            emh_morning = bool(row.get("emh_morning", False))
+                            emh_evening = bool(row.get("emh_evening", False))
+                            
+                            versioned_df, changed = create_official_version(
+                                park_date=park_date,
+                                park_code=park_code,
+                                opening_time=opening_time,
+                                closing_time=closing_time,
+                                emh_morning=emh_morning,
+                                emh_evening=emh_evening,
+                                versioned_df=versioned_df,
+                                logger=logger,
+                            )
+                            
+                            if changed:
+                                changes_count += 1
+                        except Exception as e:
+                            logger.warning(f"Row {idx}: error creating version: {e}")
+                            continue
+                    
+                    if changes_count > 0:
+                        logger.info(f"Detected {changes_count} changes in park hours")
+                    
+                    # Save versioned table
+                    save_versioned_table(versioned_df, base, logger)
+                    logger.info("Versioned table updated")
+                else:
+                    logger.warning("Could not find required columns for versioning")
+        except Exception as e:
+            logger.warning(f"Failed to update versioned table: {e} (continuing...)")
 
     logger.info("Done.")
 
