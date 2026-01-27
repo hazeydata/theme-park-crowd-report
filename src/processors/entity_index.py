@@ -22,6 +22,9 @@ CREATE TABLE entity_index (
     latest_park_date TEXT NOT NULL,      -- YYYY-MM-DD, max date with observations
     latest_observed_at TEXT NOT NULL,   -- ISO 8601 timestamp, max observed_at
     row_count INTEGER DEFAULT 0,         -- Total rows for this entity (optional, for stats)
+    actual_count INTEGER DEFAULT 0,      -- Count of ACTUAL wait_time_type observations
+    posted_count INTEGER DEFAULT 0,      -- Count of POSTED wait_time_type observations
+    priority_count INTEGER DEFAULT 0,     -- Count of PRIORITY wait_time_type observations
     last_modeled_at TEXT,                -- ISO 8601 timestamp, when we last ran modeling
     first_seen_at TEXT NOT NULL,        -- ISO 8601 timestamp, when first added to index
     updated_at TEXT NOT NULL             -- ISO 8601 timestamp, last update
@@ -84,20 +87,36 @@ def _get_park_code_from_entity(entity_code: str) -> str:
 # =============================================================================
 
 def ensure_index_db(db_path: Path) -> None:
-    """Create entity_index table if it doesn't exist."""
+    """Create entity_index table if it doesn't exist, and migrate schema if needed."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(db_path)) as conn:
+        # Create table if it doesn't exist
         conn.execute("""
             CREATE TABLE IF NOT EXISTS entity_index (
                 entity_code TEXT PRIMARY KEY,
                 latest_park_date TEXT NOT NULL,
                 latest_observed_at TEXT NOT NULL,
                 row_count INTEGER DEFAULT 0,
+                actual_count INTEGER DEFAULT 0,
+                posted_count INTEGER DEFAULT 0,
+                priority_count INTEGER DEFAULT 0,
                 last_modeled_at TEXT,
                 first_seen_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
+        
+        # Migrate existing tables: add wait_time_type count columns if they don't exist
+        cursor = conn.execute("PRAGMA table_info(entity_index)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if "actual_count" not in columns:
+            conn.execute("ALTER TABLE entity_index ADD COLUMN actual_count INTEGER DEFAULT 0")
+        if "posted_count" not in columns:
+            conn.execute("ALTER TABLE entity_index ADD COLUMN posted_count INTEGER DEFAULT 0")
+        if "priority_count" not in columns:
+            conn.execute("ALTER TABLE entity_index ADD COLUMN priority_count INTEGER DEFAULT 0")
+        
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_latest_observed_at 
             ON entity_index(latest_observed_at)
@@ -105,6 +124,10 @@ def ensure_index_db(db_path: Path) -> None:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_last_modeled_at 
             ON entity_index(last_modeled_at)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_actual_count 
+            ON entity_index(actual_count)
         """)
         conn.commit()
 
@@ -124,11 +147,11 @@ def update_index_from_dataframe(
     For each unique entity_code in df:
       - Update latest_park_date if this date is newer
       - Update latest_observed_at if any timestamp is newer
-      - Increment row_count
+      - Increment row_count and wait_time_type counts
       - Set updated_at = now()
     
     Args:
-        df: DataFrame with columns: entity_code, observed_at, and optionally park_date
+        df: DataFrame with columns: entity_code, observed_at, wait_time_type, and optionally park_date
         db_path: Path to SQLite index database
         logger: Optional logger
     
@@ -148,12 +171,26 @@ def update_index_from_dataframe(
         df = df.copy()
         df["park_date"] = pd.to_datetime(df["observed_at"], errors="coerce").dt.date.astype(str)
     
-    # Aggregate per entity: max park_date, max observed_at, count
+    # Aggregate per entity: max park_date, max observed_at, row count
     agg = df.groupby("entity_code").agg({
         "park_date": "max",
         "observed_at": "max",
-        "entity_code": "count",  # row count
+        "entity_code": "count",
     }).rename(columns={"entity_code": "row_count_new"})
+    
+    # Add wait_time_type counts if available
+    if "wait_time_type" in df.columns:
+        wait_type_counts = df.groupby("entity_code")["wait_time_type"].value_counts().unstack(fill_value=0)
+        for wait_type in ["ACTUAL", "POSTED", "PRIORITY"]:
+            if wait_type in wait_type_counts.columns:
+                agg[f"{wait_type.lower()}_count_new"] = wait_type_counts[wait_type]
+            else:
+                agg[f"{wait_type.lower()}_count_new"] = 0
+    else:
+        # No wait_time_type column - set all counts to 0
+        agg["actual_count_new"] = 0
+        agg["posted_count_new"] = 0
+        agg["priority_count_new"] = 0
     
     now = datetime.now(ZoneInfo("UTC")).isoformat()
     
@@ -164,9 +201,16 @@ def update_index_from_dataframe(
             latest_observed_at = str(row["observed_at"])
             row_count_new = int(row["row_count_new"])
             
+            # Get wait_time_type counts (columns are always set above)
+            actual_count_new = int(row["actual_count_new"])
+            posted_count_new = int(row["posted_count_new"])
+            priority_count_new = int(row["priority_count_new"])
+            
             # Check if entity exists
             cursor = conn.execute(
-                "SELECT latest_park_date, latest_observed_at, row_count, first_seen_at FROM entity_index WHERE entity_code = ?",
+                """SELECT latest_park_date, latest_observed_at, row_count, 
+                          actual_count, posted_count, priority_count, first_seen_at 
+                   FROM entity_index WHERE entity_code = ?""",
                 (entity_code,)
             )
             existing = cursor.fetchone()
@@ -176,7 +220,10 @@ def update_index_from_dataframe(
                 existing_park_date = existing[0]
                 existing_observed_at = existing[1]
                 existing_row_count = existing[2] or 0
-                first_seen_at = existing[3]
+                existing_actual_count = existing[3] or 0
+                existing_posted_count = existing[4] or 0
+                existing_priority_count = existing[5] or 0
+                first_seen_at = existing[6]
                 
                 # Only update if we have newer data
                 if latest_park_date > existing_park_date or latest_observed_at > existing_observed_at:
@@ -185,12 +232,18 @@ def update_index_from_dataframe(
                         SET latest_park_date = ?,
                             latest_observed_at = ?,
                             row_count = row_count + ?,
+                            actual_count = actual_count + ?,
+                            posted_count = posted_count + ?,
+                            priority_count = priority_count + ?,
                             updated_at = ?
                         WHERE entity_code = ?
                     """, (
                         max(latest_park_date, existing_park_date),
                         max(latest_observed_at, existing_observed_at),
                         row_count_new,
+                        actual_count_new,
+                        posted_count_new,
+                        priority_count_new,
                         now,
                         entity_code,
                     ))
@@ -199,9 +252,13 @@ def update_index_from_dataframe(
                 # Insert new entity
                 conn.execute("""
                     INSERT INTO entity_index 
-                    (entity_code, latest_park_date, latest_observed_at, row_count, first_seen_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (entity_code, latest_park_date, latest_observed_at, row_count_new, now, now))
+                    (entity_code, latest_park_date, latest_observed_at, row_count, 
+                     actual_count, posted_count, priority_count, first_seen_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    entity_code, latest_park_date, latest_observed_at, row_count_new,
+                    actual_count_new, posted_count_new, priority_count_new, now, now
+                ))
                 updated += 1
         
         conn.commit()
@@ -219,6 +276,9 @@ def update_index_from_dataframe(
 def get_entities_needing_modeling(
     db_path: Path,
     min_age_hours: float = 0.0,
+    min_actual_count: int = 0,
+    min_priority_count: int = 0,
+    min_target_count: int = 0,
     logger: Optional[logging.Logger] = None,
 ) -> List[tuple[str, str, Optional[str]]]:
     """
@@ -228,6 +288,12 @@ def get_entities_needing_modeling(
         db_path: Path to SQLite index database
         min_age_hours: Only return entities where latest_observed_at is at least
                        this many hours old (to avoid modeling on very fresh data)
+        min_actual_count: Minimum ACTUAL observations required (filters out entities with only POSTED)
+        min_priority_count: Minimum PRIORITY observations required (for PRIORITY queue modeling)
+        min_target_count: Minimum of (ACTUAL OR PRIORITY) observations required. 
+                          Useful when you don't know queue type yet - filters entities that have
+                          at least this many observations of either type (e.g., filters out TDS36
+                          which only has POSTED, no ACTUAL or PRIORITY).
         logger: Optional logger
     
     Returns:
@@ -245,27 +311,50 @@ def get_entities_needing_modeling(
         cutoff_dt = datetime.now(ZoneInfo("UTC")) - pd.Timedelta(hours=min_age_hours)
         cutoff = cutoff_dt.isoformat()
     
+    # Build WHERE clause with filters
+    conditions = ["(last_modeled_at IS NULL OR latest_observed_at > last_modeled_at)"]
+    params = []
+    
+    if cutoff:
+        conditions.append("latest_observed_at <= ?")
+        params.append(cutoff)
+    
+    if min_actual_count > 0:
+        conditions.append("actual_count >= ?")
+        params.append(min_actual_count)
+    
+    if min_priority_count > 0:
+        conditions.append("priority_count >= ?")
+        params.append(min_priority_count)
+    
+    # Filter entities that have at least min_target_count of ACTUAL OR PRIORITY
+    # This filters out entities like TDS36 that only have POSTED
+    if min_target_count > 0:
+        conditions.append("(actual_count >= ? OR priority_count >= ?)")
+        params.extend([min_target_count, min_target_count])
+    
+    where_clause = " AND ".join(conditions)
+    
     with sqlite3.connect(str(db_path)) as conn:
-        if cutoff:
-            cursor = conn.execute("""
-                SELECT entity_code, latest_observed_at, last_modeled_at
-                FROM entity_index
-                WHERE (last_modeled_at IS NULL OR latest_observed_at > last_modeled_at)
-                  AND latest_observed_at <= ?
-                ORDER BY latest_observed_at DESC
-            """, (cutoff,))
-        else:
-            cursor = conn.execute("""
-                SELECT entity_code, latest_observed_at, last_modeled_at
-                FROM entity_index
-                WHERE last_modeled_at IS NULL OR latest_observed_at > last_modeled_at
-                ORDER BY latest_observed_at DESC
-            """)
+        cursor = conn.execute(f"""
+            SELECT entity_code, latest_observed_at, last_modeled_at
+            FROM entity_index
+            WHERE {where_clause}
+            ORDER BY latest_observed_at DESC
+        """, tuple(params))
         
         results = cursor.fetchall()
     
     if logger:
-        logger.info(f"Found {len(results)} entities needing modeling")
+        filter_msg = []
+        if min_actual_count > 0:
+            filter_msg.append(f"min ACTUAL={min_actual_count}")
+        if min_priority_count > 0:
+            filter_msg.append(f"min PRIORITY={min_priority_count}")
+        if min_target_count > 0:
+            filter_msg.append(f"min (ACTUAL OR PRIORITY)={min_target_count}")
+        filter_str = f" ({', '.join(filter_msg)})" if filter_msg else ""
+        logger.info(f"Found {len(results)} entities needing modeling{filter_str}")
     
     return results
 

@@ -191,8 +191,8 @@ def main() -> None:
     ap.add_argument(
         "--python",
         type=str,
-        default=sys.executable,
-        help="Python executable to use (default: current interpreter)",
+        default=r"C:\Users\fred\AppData\Local\Programs\Python\Python311\python.exe",
+        help="Python executable to use (default: Python 3.11 - required for XGBoost compatibility)",
     )
     args = ap.parse_args()
 
@@ -234,10 +234,16 @@ def main() -> None:
         # Query entity index for entities needing training
         logger.info(f"Querying entity index for entities needing training...")
         logger.info(f"  Min age: {args.min_age_hours} hours")
+        logger.info(f"  Min target observations: {args.min_observations} (ACTUAL for STANDBY, PRIORITY for PRIORITY)")
         
+        # Filter entities: require at least min_observations of ACTUAL OR PRIORITY
+        # This filters out entities like TDS36 that only have POSTED (no ACTUAL or PRIORITY)
+        # Note: We use min_target_count because we don't know queue type until we check dimentity,
+        # but we can filter out entities that have neither ACTUAL nor PRIORITY observations
         entities_needing = get_entities_needing_modeling(
             index_db,
             min_age_hours=args.min_age_hours,
+            min_target_count=args.min_observations,  # Filter entities with insufficient ACTUAL OR PRIORITY
             logger=logger,
         )
         

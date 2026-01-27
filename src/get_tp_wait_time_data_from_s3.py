@@ -584,7 +584,8 @@ def merge_yesterday_queue_times(
                     fact_path, mode=mode, header=header, index=False
                 )
                 total += len(df)
-                all_merged_dfs.append(df_with_date[["entity_code", "observed_at", "park_date"]])
+                # Include wait_time_type for counting in index
+                all_merged_dfs.append(df_with_date[["entity_code", "observed_at", "wait_time_type", "park_date"]])
                 logger.info(f"Merged {len(df)} queue-times rows into {fact_path.relative_to(dirs['base'])} (park={park})")
                 path.unlink()
         except Exception as e:

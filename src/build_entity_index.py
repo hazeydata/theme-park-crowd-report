@@ -144,7 +144,12 @@ def scan_and_build_index(
                     else:
                         df["park_date"] = derive_park_date(df["observed_at"], default_tz)
                 
-                batch_dfs.append(df[["entity_code", "observed_at", "park_date"]])
+                # Include wait_time_type if available (for counting)
+                columns_to_include = ["entity_code", "observed_at", "park_date"]
+                if "wait_time_type" in df.columns:
+                    columns_to_include.append("wait_time_type")
+                
+                batch_dfs.append(df[columns_to_include])
                 entities_seen.update(df["entity_code"].unique())
                 
             except Exception as e:

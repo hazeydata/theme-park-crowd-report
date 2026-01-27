@@ -41,6 +41,9 @@ CREATE TABLE entity_index (
     latest_park_date TEXT NOT NULL,      -- YYYY-MM-DD, max date with observations
     latest_observed_at TEXT NOT NULL,   -- ISO 8601 timestamp, max observed_at
     row_count INTEGER DEFAULT 0,         -- Total rows for this entity (optional, for stats)
+    actual_count INTEGER DEFAULT 0,      -- Count of ACTUAL wait_time_type observations
+    posted_count INTEGER DEFAULT 0,      -- Count of POSTED wait_time_type observations
+    priority_count INTEGER DEFAULT 0,     -- Count of PRIORITY wait_time_type observations
     last_modeled_at TEXT,                -- ISO 8601 timestamp, when we last ran modeling
     first_seen_at TEXT NOT NULL,        -- ISO 8601 timestamp, when first added to index
     updated_at TEXT NOT NULL             -- ISO 8601 timestamp, last update
@@ -48,7 +51,13 @@ CREATE TABLE entity_index (
 
 CREATE INDEX idx_latest_observed_at ON entity_index(latest_observed_at);
 CREATE INDEX idx_last_modeled_at ON entity_index(last_modeled_at);
+CREATE INDEX idx_actual_count ON entity_index(actual_count);
 ```
+
+**Wait Time Type Counts**: The `actual_count`, `posted_count`, and `priority_count` columns track how many observations of each `wait_time_type` exist for each entity. This enables efficient filtering:
+- **Filter entities with no ACTUAL observations**: Exclude entities like TDS36 that only have POSTED (no ACTUAL or PRIORITY)
+- **Filter by observation threshold**: Only train entities with sufficient ACTUAL or PRIORITY observations
+- **Avoid loading data unnecessarily**: Check counts before loading entity data
 
 ## How It Works
 
@@ -56,12 +65,13 @@ CREATE INDEX idx_last_modeled_at ON entity_index(last_modeled_at);
 
 When `write_grouped_csvs()` writes new fact CSVs:
 - Aggregates per entity: `max(park_date)`, `max(observed_at)`, `count(*)`
-- Updates index: inserts new entities or updates existing ones
+- Counts wait_time_type: `count(ACTUAL)`, `count(POSTED)`, `count(PRIORITY)` per entity
+- Updates index: inserts new entities or updates existing ones (increments counts)
 - Happens automatically - no manual step needed
 
 **Integration points:**
-- `src/get_tp_wait_time_data_from_s3.py`: Updates index when writing S3 data
-- `merge_yesterday_queue_times()`: Updates index when merging queue-times staging
+- `src/get_tp_wait_time_data_from_s3.py`: Updates index when writing S3 data (includes wait_time_type counts)
+- `merge_yesterday_queue_times()`: Updates index when merging queue-times staging (includes wait_time_type counts)
 
 ### 2. Entity Loading (Selective CSV Reading)
 
@@ -127,6 +137,25 @@ This scans all CSVs in `fact_tables/clean/` and builds the index. After this, in
 4. **Small**: Index is metadata only, not duplicate data
 5. **Fast**: SQLite with indexes on query columns
 6. **Self-maintaining**: Updates automatically when data is written
+
+## Benefits of Wait Time Type Counts
+
+1. **Efficient filtering**: Filter entities before loading data (e.g., exclude TDS36 that only has POSTED)
+2. **Threshold-based training**: Only train entities with sufficient ACTUAL or PRIORITY observations
+3. **Queue type awareness**: Know which entities have ACTUAL vs PRIORITY data without loading CSVs
+4. **Performance**: Avoid loading data for entities that won't be trained anyway
+
+## Migration
+
+Existing entity indexes are automatically migrated when `ensure_index_db()` is called:
+- Adds `actual_count`, `posted_count`, `priority_count` columns if they don't exist
+- Sets default values to 0 for existing rows
+- Future updates will increment these counts correctly
+
+To rebuild counts for existing entities, run:
+```bash
+python src/build_entity_index.py --rebuild
+```
 
 ## Future Optimizations
 

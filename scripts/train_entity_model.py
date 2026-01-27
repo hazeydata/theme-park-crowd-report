@@ -106,16 +106,6 @@ def main() -> None:
     logger.info(f"Output base: {base}")
     logger.info(f"Train ratio: {args.train_ratio}, Val ratio: {args.val_ratio}")
 
-    # Load entity data
-    logger.info("Loading entity data...")
-    df = load_entity_data(args.entity, base, db_path=index_db, logger=logger)
-    
-    if df.empty:
-        logger.error(f"No data found for entity {entity_display}")
-        sys.exit(1)
-    
-    logger.info(f"Loaded {len(df):,} rows")
-    
     # Determine queue type: PRIORITY (fastpass_booth=TRUE) or STANDBY (fastpass_booth=FALSE)
     is_priority = is_priority_queue(args.entity, base)
     queue_type = "PRIORITY" if is_priority else "STANDBY"
@@ -123,12 +113,55 @@ def main() -> None:
     
     logger.info(f"Queue type: {queue_type} (fastpass_booth={is_priority})")
     
+    # Quick pre-check: Load a small sample first to check if entity has the required wait_time_type
+    # This avoids loading all data for entities that only have POSTED (no ACTUAL)
+    logger.info("Checking if entity has required wait time type...")
+    from processors.entity_index import load_entity_data
+    df_sample = load_entity_data(args.entity, base, db_path=index_db, logger=logger)
+    
+    if df_sample.empty:
+        logger.error(f"No data found for entity {entity_display}")
+        sys.exit(1)
+    
+    # Check wait_time_type distribution in sample
+    wait_type_counts = df_sample["wait_time_type"].value_counts()
+    logger.info(f"Wait time type distribution (sample): {dict(wait_type_counts)}")
+    
+    target_count_sample = len(df_sample[df_sample["wait_time_type"] == target_wait_type])
+    
+    # If no target wait_time_type found in sample, check full dataset (might be sparse)
+    # But if sample is large enough and still 0, skip full load
+    if target_count_sample == 0 and len(df_sample) >= 1000:
+        logger.warning(f"No {target_wait_type} observations found in sample of {len(df_sample):,} rows")
+        logger.info("Entity likely has no {target_wait_type} data - will create mean model with 0")
+        # Load full dataset anyway to be sure, but this is a warning case
+    elif target_count_sample == 0:
+        logger.info(f"No {target_wait_type} in initial sample ({len(df_sample):,} rows) - loading full dataset to verify...")
+    
+    # Load full entity data
+    logger.info("Loading full entity data...")
+    df = load_entity_data(args.entity, base, db_path=index_db, logger=logger)
+    
+    logger.info(f"Loaded {len(df):,} rows")
+    
+    # Show wait_time_type distribution to help understand why entity is being processed
+    wait_type_counts = df["wait_time_type"].value_counts()
+    logger.info(f"Wait time type distribution: {dict(wait_type_counts)}")
+    
     # Check observation count for the appropriate wait time type
     df_target = df[df["wait_time_type"] == target_wait_type]
     target_count = len(df_target)
     logger.info(f"{target_wait_type} observations: {target_count:,}")
     
     MIN_OBSERVATIONS_FOR_TRAINING = 500
+    
+    # Early exit with clear message if entity has no target wait_time_type data
+    # (e.g., TDS36 has only POSTED, no ACTUAL)
+    if target_count == 0:
+        logger.warning(f"Entity {entity_display} has no {target_wait_type} observations")
+        logger.info(f"Available wait time types: {list(wait_type_counts.keys())}")
+        logger.info(f"This entity will be skipped for {target_wait_type} modeling")
+        logger.info("Creating mean model with default value of 0...")
     
     if target_count < MIN_OBSERVATIONS_FOR_TRAINING:
         logger.info(f"Entity has {target_count:,} {target_wait_type} observations (< {MIN_OBSERVATIONS_FOR_TRAINING})")
