@@ -55,7 +55,43 @@
 
 **Usage**: `add_features(df, output_base)` takes fact rows and returns feature-rich DataFrame ready for encoding and modeling.
 
-**Future**: `add_park_hours` (needs dimparkhours → donor bridge). Encoding is a separate step (categorical → numeric for ML).
+**Park Hours**: `add_park_hours` implemented with versioned table support (dimparkhours_with_donor.csv).
+
+---
+
+## Encoding Module (DONE)
+
+**Implemented**: [src/processors/encoding.py](src/processors/encoding.py) converts categorical features to numeric format for ML models.
+
+**Features**:
+  - **Label Encoding** (default): Maps categories to integers (0, 1, 2, ...). Recommended for tree-based models (XGBoost, LightGBM).
+  - **One-Hot Encoding**: Creates binary columns for each category. Useful for linear models or when categories have no ordinal meaning.
+  - **Mappings Storage**: Saves encoding mappings to `state/encoding_mappings.json` for consistent encoding during inference.
+  - **Unknown Handling**: Configurable handling of unknown values ("error", "ignore", or "encode").
+
+**Categorical Features Encoded**:
+  - `pred_dategroupid`: Date group ID
+  - `pred_season`: Season name
+  - `pred_season_year`: Season year
+  - `park_code`: Park code
+  - `entity_code`: Entity/attraction code
+
+**Usage**:
+  ```python
+  from processors.encoding import encode_features
+  
+  # After adding features
+  df_features = add_features(df, output_base)
+  
+  # Encode categorical features
+  df_encoded, mappings = encode_features(
+      df_features,
+      output_base,
+      strategy="label",  # or "one_hot"
+  )
+  ```
+
+**Future**: Target encoding support (for mean-based encoding with regularization).
 
 ---
 
