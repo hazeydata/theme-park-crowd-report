@@ -26,6 +26,7 @@ Creates:
 - **ThemeParkWaitTimeReport_530am** — Daily at 5:30 AM (wait-time DB report, after 5am ETL)
 - **ThemeParkDimensionFetch_6am** — Daily at 6:00 AM (entity, park hours, events, metatable from S3; build dimdategroupid, dimseason)
 - **ThemeParkPostedAccuracyReport_Sunday** — Weekly Sunday at 6:30 AM (posted prediction accuracy report)
+- **ThemeParkLogCleanup_Sunday** — Weekly Sunday at 7:00 AM (log cleanup: deletes logs older than 30 days, keeps 10 most recent per type)
 - **ThemeParkWaitTimeETL_7am** — Daily at 7:00 AM (wait-time ETL, backup)
 
 See [README.md](../README.md#scheduling) for details.
@@ -285,6 +286,33 @@ Or with the virtual environment activated:
 .\venv\Scripts\Activate.ps1
 python scripts/script_name.py
 ```
+
+### `cleanup_logs.py`
+
+Cleans up old log files from the pipeline. Removes logs older than a specified number of days, optionally keeping the N most recent logs per log type.
+
+**Usage:**
+```powershell
+# Dry run (show what would be deleted)
+python scripts/cleanup_logs.py --dry-run
+
+# Delete logs older than 30 days, keep 10 most recent per type
+python scripts/cleanup_logs.py --days 30 --keep-recent 10
+
+# Delete all logs older than 7 days
+python scripts/cleanup_logs.py --days 7
+
+# Delete specific log pattern (e.g., all train_entity_model logs older than 14 days)
+python scripts/cleanup_logs.py --days 14 --pattern "train_entity_model_*.log"
+```
+
+**Options**: `--output-base`, `--days` (default: 30), `--keep-recent` (keep N most recent per type), `--pattern` (glob pattern filter), `--dry-run`, `--log-dir` (override log directory).
+
+**Features:**
+- Groups logs by type (e.g., `train_batch_entities`, `get_park_hours`) automatically
+- Keeps most recent logs per type even if older than cutoff (if `--keep-recent` specified)
+- Dry-run mode to preview deletions
+- Detailed logging of what's deleted/kept
 
 ## Note
 

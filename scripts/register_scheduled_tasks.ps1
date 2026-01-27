@@ -8,6 +8,7 @@
 $ErrorActionPreference = "Continue"  # Continue on errors so we can see which tasks failed
 $ProjectRoot = "d:\GitHub\hazeydata\theme-park-crowd-report"
 $PythonExe   = "C:\Python314\python.exe"
+$Python311Exe = "C:\Users\fred\AppData\Local\Programs\Python\Python311\python.exe"
 $Script      = "src/get_tp_wait_time_data_from_s3.py"
 
 $Action = New-ScheduledTaskAction `
@@ -130,6 +131,27 @@ try {
     Write-Host "Registered: ThemeParkPostedAccuracyReport_Sunday (Weekly Sunday 6:30 AM)" -ForegroundColor Green
 } catch {
     Write-Host "Failed to register ThemeParkPostedAccuracyReport_Sunday: $_" -ForegroundColor Red
+}
+
+# Log Cleanup: run weekly on Sunday at 7:00 AM (after other Sunday tasks)
+# Deletes logs older than 30 days, keeps 10 most recent per log type
+$CleanupScript = Join-Path $ProjectRoot "scripts\cleanup_logs.py"
+$CleanupAction = New-ScheduledTaskAction `
+    -Execute $Python311Exe `
+    -Argument "`"$CleanupScript`" --days 30 --keep-recent 10" `
+    -WorkingDirectory $ProjectRoot
+$CleanupTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "7:00AM"
+try {
+    Register-ScheduledTask `
+        -TaskName "ThemeParkLogCleanup_Sunday" `
+        -Action $CleanupAction `
+        -Trigger $CleanupTrigger `
+        -Settings $Settings `
+        -Description "Log Cleanup - weekly Sunday 7:00 AM Eastern. Deletes logs older than 30 days, keeps 10 most recent per log type." `
+        -Force
+    Write-Host "Registered: ThemeParkLogCleanup_Sunday (Weekly Sunday 7:00 AM)" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to register ThemeParkLogCleanup_Sunday: $_" -ForegroundColor Red
 }
 
 Write-Host ""

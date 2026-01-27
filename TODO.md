@@ -265,4 +265,35 @@ See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the l
 
 ---
 
+## Log Cleanup System (DONE)
+
+**Implemented**: [scripts/cleanup_logs.py](scripts/cleanup_logs.py) provides automated log file cleanup.
+
+**Features**:
+- Deletes logs older than a specified number of days (configurable, default: 30 days)
+- Optionally keeps N most recent logs per log type (e.g., keep 10 most recent `train_batch_entities` logs)
+- Groups logs by type automatically (e.g., `train_batch_entities`, `train_entity_model`, `get_park_hours`)
+- Dry-run mode to preview deletions
+- Pattern filtering (e.g., clean only `train_entity_model_*.log` files)
+- Detailed logging of cleanup operations
+
+**Usage**:
+```powershell
+# Dry run (show what would be deleted)
+python scripts/cleanup_logs.py --dry-run --days 30 --keep-recent 10
+
+# Delete logs older than 30 days, keep 10 most recent per type
+python scripts/cleanup_logs.py --days 30 --keep-recent 10
+
+# Delete all logs older than 7 days
+python scripts/cleanup_logs.py --days 7
+
+# Delete specific log pattern
+python scripts/cleanup_logs.py --days 14 --pattern "train_entity_model_*.log"
+```
+
+**Scheduled**: Weekly Sunday at 7:00 AM Eastern via **ThemeParkLogCleanup_Sunday** scheduled task. Deletes logs older than 30 days, keeps 10 most recent per log type.
+
+---
+
 *Add new items below as needed.*

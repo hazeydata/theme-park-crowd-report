@@ -397,7 +397,7 @@ powershell -ExecutionPolicy Bypass -File scripts/register_scheduled_tasks.ps1
 
 The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\theme-park-crowd-report`. Edit `scripts/register_scheduled_tasks.ps1` if your Python path or project root differ.
 
-**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkWaitTimeReport_530am` / `ThemeParkDimensionFetch_6am` / `ThemeParkWaitTimeETL_7am`.
+**View or edit**: Open **Task Scheduler** (`taskschd.msc`) → Task Scheduler Library → `ThemeParkWaitTimeETL_5am` / `ThemeParkWaitTimeReport_530am` / `ThemeParkDimensionFetch_6am` / `ThemeParkPostedAccuracyReport_Sunday` / `ThemeParkLogCleanup_Sunday` / `ThemeParkWaitTimeETL_7am`.
 
 **Time zone**: Tasks use the **system local time**. Set Windows to Eastern Time so 5:00, 6:00, and 7:00 AM are Eastern.
 
