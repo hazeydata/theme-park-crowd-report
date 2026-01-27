@@ -15,9 +15,12 @@ Features added:
   - observed_wait_time: Target variable (from wait_time_minutes)
   - park_date: Operational date (6am rule)
   - park_code: Derived from entity_code prefix
-
-Future:
-  - add_park_hours: Park hours features (needs dimparkhours → donor bridge)
+  - pred_mins_since_park_open: Minutes since park opening time
+  - pred_park_open_hour: Opening hour (0-23)
+  - pred_park_close_hour: Closing hour (0-23)
+  - pred_park_hours_open: Hours the park is open
+  - pred_emh_morning: True if morning Extra Magic Hours
+  - pred_emh_evening: True if evening Extra Magic Hours
 
 ================================================================================
 USAGE
@@ -63,6 +66,27 @@ if str(Path(__file__).parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from get_tp_wait_time_data_from_s3 import PARK_CODE_MAP, derive_park_date, get_park_code
+
+# Park code to timezone mapping
+PARK_TIMEZONE_MAP = {
+    # WDW parks (Eastern)
+    "mk": "America/New_York",
+    "ep": "America/New_York",
+    "hs": "America/New_York",
+    "ak": "America/New_York",
+    # DLR parks (Pacific)
+    "dl": "America/Los_Angeles",
+    "ca": "America/Los_Angeles",
+    # UOR parks (Eastern)
+    "ia": "America/New_York",
+    "uf": "America/New_York",
+    "eu": "America/New_York",
+    # USH (Pacific)
+    "uh": "America/Los_Angeles",
+    # TDR parks (Tokyo)
+    "tdl": "Asia/Tokyo",
+    "tds": "Asia/Tokyo",
+}
 
 
 # =============================================================================
@@ -431,12 +455,219 @@ def add_observed_wait_time(df: pd.DataFrame) -> pd.DataFrame:
 # MAIN FEATURE ADDITION FUNCTION
 # =============================================================================
 
+def add_park_hours(
+    df: pd.DataFrame,
+    dimparkhours: Optional[pd.DataFrame],
+    logger: Optional[logging.Logger] = None,
+) -> pd.DataFrame:
+    """
+    Add park hours features: mins_since_park_open, park open/close hours, EMH flags.
+    
+    Joins to dimparkhours on (park_date, park_code) and calculates:
+      - pred_mins_since_park_open: Minutes since park opening time
+      - pred_park_open_hour: Opening hour (0-23)
+      - pred_park_close_hour: Closing hour (0-23)
+      - pred_park_hours_open: Hours the park is open
+      - pred_emh_morning: True if morning EMH
+      - pred_emh_evening: True if evening EMH
+    
+    Args:
+        df: DataFrame with park_date, park_code, observed_at columns
+        dimparkhours: dimparkhours DataFrame (park_date, park_code, opening_time, closing_time, emh_*)
+        logger: Optional logger
+    
+    Returns:
+        DataFrame with park hours features added
+    """
+    df = df.copy()
+    
+    if dimparkhours is None or dimparkhours.empty:
+        if logger:
+            logger.warning("dimparkhours not available; park hours features will be null")
+        df["pred_mins_since_park_open"] = None
+        df["pred_park_open_hour"] = None
+        df["pred_park_close_hour"] = None
+        df["pred_park_hours_open"] = None
+        df["pred_emh_morning"] = False
+        df["pred_emh_evening"] = False
+        return df
+    
+    # Find columns in dimparkhours
+    date_col = None
+    for col in ["park_date", "date", "park_day_id"]:
+        if col in dimparkhours.columns:
+            date_col = col
+            break
+    
+    park_col = None
+    for col in ["park_code", "park", "code"]:
+        if col in dimparkhours.columns:
+            park_col = col
+            break
+    
+    open_col = None
+    for col in ["opening_time", "open", "open_time", "open_time_1"]:
+        if col in dimparkhours.columns:
+            open_col = col
+            break
+    
+    close_col = None
+    for col in ["closing_time", "close", "close_time", "close_time_1"]:
+        if col in dimparkhours.columns:
+            close_col = col
+            break
+    
+    if not date_col or not park_col or not open_col or not close_col:
+        if logger:
+            logger.warning("dimparkhours missing required columns; park hours features will be null")
+        df["pred_mins_since_park_open"] = None
+        df["pred_park_open_hour"] = None
+        df["pred_park_close_hour"] = None
+        df["pred_park_hours_open"] = None
+        df["pred_emh_morning"] = False
+        df["pred_emh_evening"] = False
+        return df
+    
+    # Normalize dates and park codes for join
+    dim = dimparkhours.copy()
+    dim["_park_date_norm"] = pd.to_datetime(dim[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
+    dim["_park_code_norm"] = dim[park_col].astype(str).str.strip().str.upper()
+    df["_park_date_norm"] = pd.to_datetime(df["park_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_park_code_norm"] = df["park_code"].astype(str).str.strip().str.upper()
+    
+    # Join to dimparkhours
+    merge_cols = ["_park_date_norm", "_park_code_norm"]
+    keep_cols = [open_col, close_col]
+    
+    # Add EMH columns if present
+    emh_morning_col = None
+    emh_evening_col = None
+    for col in ["emh_morning", "emh_am", "early_magic_hours_morning"]:
+        if col in dim.columns:
+            emh_morning_col = col
+            keep_cols.append(col)
+            break
+    
+    for col in ["emh_evening", "emh_pm", "early_magic_hours_evening"]:
+        if col in dim.columns:
+            emh_evening_col = col
+            keep_cols.append(col)
+            break
+    
+    merged = df.merge(
+        dim[merge_cols + keep_cols],
+        on=merge_cols,
+        how="left",
+    )
+    
+    # Parse opening_time and closing_time
+    # They could be ISO8601 datetime strings or simple HH:MM time strings
+    def parse_park_time(time_str, park_date_str, park_tz_str):
+        """Parse time string (ISO8601 or HH:MM) to datetime in park timezone."""
+        if pd.isna(time_str) or time_str is None:
+            return None
+        
+        time_str = str(time_str).strip()
+        if not time_str:
+            return None
+        
+        # Try parsing as ISO8601 datetime first
+        try:
+            dt = pd.to_datetime(time_str, errors="raise")
+            if dt.tz is not None:
+                # Already timezone-aware, convert to park timezone
+                return dt
+            # Not timezone-aware, assume it's in park timezone
+            tz = ZoneInfo(park_tz_str)
+            return dt.tz_localize(tz)
+        except (ValueError, TypeError):
+            pass
+        
+        # Try parsing as HH:MM or HH:MM:SS
+        try:
+            parts = time_str.split(":")
+            if len(parts) >= 2:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    # Combine with park_date
+                    park_date = pd.to_datetime(park_date_str)
+                    tz = ZoneInfo(park_tz_str)
+                    return pd.Timestamp(
+                        year=park_date.year,
+                        month=park_date.month,
+                        day=park_date.day,
+                        hour=hour,
+                        minute=minute,
+                        tz=tz,
+                    )
+        except (ValueError, TypeError, IndexError):
+            pass
+        
+        return None
+    
+    # Get park timezone from park_code
+    # Each entity belongs to one park, so all rows should have same park_code
+    if len(df) > 0 and "park_code" in df.columns:
+        first_park_code = str(df["park_code"].iloc[0]).lower().strip()
+        park_tz_str = PARK_TIMEZONE_MAP.get(first_park_code, "America/New_York")
+    else:
+        park_tz_str = "America/New_York"  # Default
+    
+    # Parse opening and closing times
+    opening_dt = merged.apply(
+        lambda row: parse_park_time(row[open_col], row["_park_date_norm"], park_tz_str),
+        axis=1,
+    )
+    closing_dt = merged.apply(
+        lambda row: parse_park_time(row[close_col], row["_park_date_norm"], park_tz_str),
+        axis=1,
+    )
+    
+    # Calculate pred_mins_since_park_open
+    observed_dt = pd.to_datetime(df["observed_at"], errors="coerce", utc=True)
+    if observed_dt.dt.tz is None:
+        observed_dt = observed_dt.dt.tz_localize("UTC")
+    observed_dt = observed_dt.dt.tz_convert(park_tz_str)
+    
+    mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
+    df["pred_mins_since_park_open"] = mins_since_open.astype("Float64")  # Nullable float
+    
+    # Extract hours
+    df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
+    df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
+    
+    # Calculate hours_open (handle overnight)
+    hours_open = (closing_dt - opening_dt).dt.total_seconds() / 3600.0
+    # If closing is before opening (overnight), add 24 hours
+    mask_overnight = closing_dt < opening_dt
+    if mask_overnight.any():
+        hours_open.loc[mask_overnight] = hours_open.loc[mask_overnight] + 24.0
+    df["pred_park_hours_open"] = hours_open.astype("Float64")
+    
+    # EMH flags
+    if emh_morning_col:
+        df["pred_emh_morning"] = merged[emh_morning_col].fillna(False).astype(bool)
+    else:
+        df["pred_emh_morning"] = False
+    
+    if emh_evening_col:
+        df["pred_emh_evening"] = merged[emh_evening_col].fillna(False).astype(bool)
+    else:
+        df["pred_emh_evening"] = False
+    
+    # Cleanup temp columns
+    df = df.drop(columns=["_park_date_norm", "_park_code_norm"], errors="ignore")
+    
+    return df
+
+
 def add_features(
     df: pd.DataFrame,
     output_base: Path,
     logger: Optional[logging.Logger] = None,
     *,
-    include_park_hours: bool = False,
+    include_park_hours: bool = True,
 ) -> pd.DataFrame:
     """
     Add all features to a fact DataFrame.
@@ -449,14 +680,13 @@ def add_features(
     5. Joins to dimseason → pred_season, pred_season_year
     6. Adds wgt_geo_decay
     7. Adds observed_wait_time (target)
-    
-    Future: add_park_hours (when dimparkhours bridge is ready)
+    8. Adds park hours features (if include_park_hours=True)
     
     Args:
         df: DataFrame with columns: entity_code, observed_at, wait_time_type, wait_time_minutes
         output_base: Pipeline output base directory (for loading dimensions)
         logger: Optional logger
-        include_park_hours: If True, add park hours features (not yet implemented)
+        include_park_hours: If True, add park hours features (default: True)
     
     Returns:
         DataFrame with all features added (pred_*, wgt_geo_decay, observed_wait_time, park_date, park_code)
@@ -473,6 +703,23 @@ def add_features(
     # Load dimensions
     dims = load_dims(output_base, logger)
     
+    # Load dimparkhours if needed
+    dimparkhours = None
+    if include_park_hours:
+        dim_dir = output_base / "dimension_tables"
+        park_hours_path = dim_dir / "dimparkhours.csv"
+        if park_hours_path.exists():
+            try:
+                dimparkhours = pd.read_csv(park_hours_path, low_memory=False)
+                if logger:
+                    logger.debug(f"Loaded dimparkhours: {len(dimparkhours)} rows")
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Could not load dimparkhours: {e}")
+        else:
+            if logger:
+                logger.warning(f"dimparkhours not found: {park_hours_path}")
+    
     # Add features in order
     df = add_park_code(df)
     df = add_park_date(df)
@@ -482,9 +729,8 @@ def add_features(
     df = add_geometric_decay(df)
     df = add_observed_wait_time(df)
     
-    # Future: add_park_hours when ready
+    # Add park hours features
     if include_park_hours:
-        if logger:
-            logger.warning("add_park_hours not yet implemented; skipping")
+        df = add_park_hours(df, dimparkhours, logger)
     
     return df
