@@ -143,6 +143,32 @@ python src/build_entity_index.py --output-base "D:\Path"
 
 **Note**: The index updates automatically during ETL runs, so a full rebuild is only needed for initial creation or recovery. See [docs/ENTITY_INDEX.md](../docs/ENTITY_INDEX.md).
 
+### `test_modeling_pipeline.py`
+
+Tests the complete modeling pipeline (forecast, backfill, WTI) with a small subset of entities and dates. Useful for validating the pipeline before running on full datasets.
+
+**Features**:
+- Automatically selects test entities from entity index
+- Generates mix of past and future test dates
+- Runs all three pipeline stages sequentially
+- Validates output file formats and required columns
+- Provides clear pass/fail summary
+
+**Run**:
+
+```powershell
+# Test with default settings (2 entities, 7 dates)
+python scripts/test_modeling_pipeline.py
+
+# Test specific entity with more dates
+python scripts/test_modeling_pipeline.py --entity MK101 --num-dates 14
+
+# Test with more entities
+python scripts/test_modeling_pipeline.py --num-entities 5 --num-dates 10
+```
+
+**Options**: `--output-base`, `--entity` (test specific entity), `--num-entities` (default: 2), `--num-dates` (default: 7).
+
 ### `inspect_entity_index.py`
 
 Inspects the entity metadata index to show entities, their latest observations, and which ones need re-modeling.
@@ -167,6 +193,12 @@ python scripts/inspect_entity_index.py --limit 50
 Examples of scripts that might go here:
 - Data validation scripts
 - One-off data migration scripts
+- **Modeling pipeline scripts**:
+  - `generate_forecast.py` — Generate predicted ACTUAL and POSTED for future dates
+  - `generate_backfill.py` — Generate historical ACTUAL curves using with-POSTED model
+  - `calculate_wti.py` — Calculate Wait Time Index from curves
+  - `test_modeling_pipeline.py` — Test the complete modeling pipeline with small subset
+
 - Reporting and analysis scripts
 - Maintenance utilities
 
