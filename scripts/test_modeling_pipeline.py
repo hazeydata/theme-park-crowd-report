@@ -240,7 +240,7 @@ def validate_outputs(
                             logger.error(f"  {filename}: Missing columns: {missing_cols}")
                             all_valid = False
                         else:
-                            logger.info(f"  {filename}: ✓ Valid ({len(df)} time slots)")
+                            logger.info(f"  {filename}: Valid ({len(df)} time slots)")
                     except Exception as e:
                         logger.error(f"  {filename}: Error reading file: {e}")
                         all_valid = False
@@ -271,7 +271,7 @@ def validate_outputs(
                             logger.error(f"  {filename}: Missing columns: {missing_cols}")
                             all_valid = False
                         else:
-                            logger.info(f"  {filename}: ✓ Valid ({len(df)} time slots)")
+                            logger.info(f"  {filename}: Valid ({len(df)} time slots)")
                     except Exception as e:
                         logger.error(f"  {filename}: Error reading file: {e}")
                         all_valid = False
@@ -290,7 +290,7 @@ def validate_outputs(
                 logger.error(f"WTI file: Missing columns: {missing_cols}")
                 all_valid = False
             else:
-                logger.info(f"WTI file: ✓ Valid ({len(df)} rows)")
+                logger.info(f"WTI file: Valid ({len(df)} rows)")
                 logger.info(f"  Date range: {df['park_date'].min()} to {df['park_date'].max()}")
                 logger.info(f"  Parks: {sorted(df['park_code'].unique())}")
         except Exception as e:
@@ -412,14 +412,14 @@ def main() -> None:
     logger.info("=" * 80)
     
     for test_name, passed in results.items():
-        status = "✓ PASSED" if passed else "✗ FAILED"
+        status = "PASSED" if passed else "FAILED"
         logger.info(f"  {test_name.upper()}: {status}")
     
     all_passed = all(results.values())
     
     if all_passed:
         logger.info("")
-        logger.info("All tests passed! ✓")
+        logger.info("All tests passed!")
         sys.exit(0)
     else:
         logger.info("")
