@@ -198,9 +198,9 @@ def main() -> None:
     for package_name, package_spec in REQUIRED_PACKAGES.items():
         is_installed, error = check_package(package_name)
         if is_installed:
-            print(f"  ✓ {package_name}")
+            print(f"  [OK] {package_name}")
         else:
-            print(f"  ✗ {package_name} - {error}")
+            print(f"  [MISSING] {package_name} - {error}")
             missing_packages.append((package_name, package_spec))
             all_checks_passed = False
     
@@ -211,10 +211,10 @@ def main() -> None:
             for package_name, package_spec in missing_packages:
                 print(f"  Installing {package_spec}...")
                 if install_package(package_spec):
-                    print(f"  ✓ Installed {package_name}")
+                    print(f"  [OK] Installed {package_name}")
                     all_checks_passed = True  # Re-check after install
                 else:
-                    print(f"  ✗ Failed to install {package_name}")
+                    print(f"  [FAILED] Failed to install {package_name}")
                     all_checks_passed = False
         else:
             print("To install missing packages, run with --install-missing")
@@ -226,9 +226,9 @@ def main() -> None:
     print("-" * 80)
     index_ok, index_msg = check_entity_index(base)
     if index_ok:
-        print(f"  ✓ {index_msg}")
+        print(f"  [OK] {index_msg}")
     else:
-        print(f"  ✗ {index_msg}")
+        print(f"  [MISSING] {index_msg}")
         all_checks_passed = False
     print()
     
@@ -237,9 +237,9 @@ def main() -> None:
     print("-" * 80)
     models_ok, models_msg, model_count = check_models(base, args.min_models)
     if models_ok:
-        print(f"  ✓ {models_msg}")
+        print(f"  [OK] {models_msg}")
     else:
-        print(f"  ✗ {models_msg}")
+        print(f"  [MISSING] {models_msg}")
         print(f"    Run: python scripts/train_entity_model.py --entity <ENTITY_CODE>")
         all_checks_passed = False
     print()
@@ -249,9 +249,9 @@ def main() -> None:
     print("-" * 80)
     aggregates_ok, aggregates_msg = check_posted_aggregates(base)
     if aggregates_ok:
-        print(f"  ✓ {aggregates_msg}")
+        print(f"  [OK] {aggregates_msg}")
     else:
-        print(f"  ✗ {aggregates_msg}")
+        print(f"  [MISSING] {aggregates_msg}")
         print(f"    Run: python scripts/build_posted_aggregates.py")
         all_checks_passed = False
     print()
@@ -261,9 +261,9 @@ def main() -> None:
     print("-" * 80)
     park_hours_ok, park_hours_msg = check_versioned_park_hours(base)
     if park_hours_ok:
-        print(f"  ✓ {park_hours_msg}")
+        print(f"  [OK] {park_hours_msg}")
     else:
-        print(f"  ⚠ {park_hours_msg}")
+        print(f"  [OPTIONAL] {park_hours_msg}")
         print(f"    Optional - can use flat dimparkhours.csv as fallback")
         print(f"    To create: python src/migrate_park_hours_to_versioned.py")
         print(f"    Then: python src/build_park_hours_donor.py")
@@ -274,16 +274,16 @@ def main() -> None:
     print("-" * 80)
     encoding_ok, encoding_msg = check_encoding_mappings(base)
     if encoding_ok:
-        print(f"  ✓ {encoding_msg}")
+        print(f"  [OK] {encoding_msg}")
     else:
-        print(f"  ⚠ {encoding_msg}")
+        print(f"  [OPTIONAL] {encoding_msg}")
         print(f"    Will be created automatically during first encoding")
     print()
     
     # Summary
     print("=" * 80)
     if all_checks_passed:
-        print("✓ All required prerequisites are met!")
+        print("[SUCCESS] All required prerequisites are met!")
         print()
         print("You can now run:")
         print("  python scripts/test_modeling_pipeline.py")
@@ -292,7 +292,7 @@ def main() -> None:
         print("  python scripts/calculate_wti.py")
         sys.exit(0)
     else:
-        print("✗ Some prerequisites are missing")
+        print("[FAILED] Some prerequisites are missing")
         print()
         print("Required actions:")
         if missing_packages and not args.install_missing:
