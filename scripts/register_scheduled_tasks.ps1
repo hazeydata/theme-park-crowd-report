@@ -88,6 +88,23 @@ Register-ScheduledTask `
     -Force
 Write-Host "Registered: ThemeParkWaitTimeReport_530am (Daily 5:30 AM)"
 
+# Posted Accuracy Report: run weekly on Sunday at 6:30 AM (after dimension fetch)
+# Tracks how well predicted POSTED (from aggregates) matches observed POSTED
+$PostedAccScript = Join-Path $ProjectRoot "scripts\report_posted_accuracy.py"
+$PostedAccAction = New-ScheduledTaskAction `
+    -Execute $PythonExe `
+    -Argument "`"$PostedAccScript`"" `
+    -WorkingDirectory $ProjectRoot
+$PostedAccTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "6:30AM"
+Register-ScheduledTask `
+    -TaskName "ThemeParkPostedAccuracyReport_Sunday" `
+    -Action $PostedAccAction `
+    -Trigger $PostedAccTrigger `
+    -Settings $Settings `
+    -Description "Posted Prediction Accuracy Report - weekly Sunday 6:30 AM Eastern. Tracks accuracy of predicted POSTED vs observed POSTED to evaluate aggregation approach." `
+    -Force
+Write-Host "Registered: ThemeParkPostedAccuracyReport_Sunday (Weekly Sunday 6:30 AM)"
+
 Write-Host ""
 Write-Host "Done. Tasks use local time; set system time zone to Eastern for 5/6/7 AM ET."
 Write-Host "View in Task Scheduler: taskschd.msc -> Task Scheduler Library"
