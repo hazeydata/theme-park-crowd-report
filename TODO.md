@@ -198,10 +198,8 @@ See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the l
 
 **Suggested order:**
 
-1. **Entity-grouped fact** — Build `fact_tables/by_entity/{entity}.csv` (or Parquet) from park-date CSVs. Unblocks BI, `latest_obs_report`, and a single Parquet if we want to feed Julia.
-2. **`latest_obs_report.csv`** — `entity_code`, `latest_observation_date` (max park_date per entity). Needed for attraction-io and for “who to model” logic.
-3. **Python feature module** — `add_mins_since_6am`, `add_dategroupid`, `add_season`, `add_geometric_decay` (from `observed_at`/park_date + dims); then `add_park_hours` (needs dimparkhours → donor-style bridge).
-4. **Parquet + S3 (optional)** — One `wait_time_fact_table.parquet` + `latest_obs_report.csv` to `s3://.../fact_tables/` if we keep running attraction-io’s Julia pipeline.
+1. **Python feature module** — `add_mins_since_6am`, `add_dategroupid`, `add_season`, `add_geometric_decay` (from `observed_at`/park_date + dims); then `add_park_hours` (needs dimparkhours → donor-style bridge).
+2. **Parquet + S3 (optional)** — One `wait_time_fact_table.parquet` to `s3://.../fact_tables/` if we keep running attraction-io's Julia pipeline.
 
 ---
 
@@ -210,6 +208,60 @@ See [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md) for the l
 **Check**: After the scheduled task runs (ThemeParkWaitTimeReport_530am at 5:30 AM), verify that `reports/wait_time_db_report.md` was updated with today's date. The report should show the latest data including any new park-date CSVs from the 5am ETL run.
 
 **If not updated**: Check Task Scheduler to see if the task ran successfully, check logs for errors.
+
+---
+
+## Modeling Variant for Entities Without ACTUAL Observations
+
+**Goal**: Create a modeling variant that can predict ACTUAL wait time curves for entities that have no ACTUAL observations.
+
+**Approach**: Model based on entity attributes rather than `entity_code`:
+- Use entity attributes from `dimentity` (ratings, attraction type, thrill level, duration, height requirement, etc.)
+- Group entities with similar attributes (similar ratings, types, similar POSTED times)
+- Train models on entities that DO have ACTUAL data, grouped by attribute similarity
+- Apply these attribute-based models to entities without ACTUAL observations
+
+**Use cases**:
+- New attractions that haven't opened yet (no ACTUAL data)
+- Attractions that only report POSTED times
+- Historical attractions that closed before ACTUAL tracking began
+
+**Implementation considerations**:
+- Feature engineering: Add entity attributes as features (from `dimentity`)
+- Clustering/grouping: Identify similar entities based on attributes
+- Model training: Train models per attribute group rather than per entity
+- Inference: Apply group model to entities without ACTUAL data
+
+---
+
+## Check Posted Aggregates Build Status
+
+**Status**: `build_posted_aggregates.py` is currently running in the background (started ~5:26 AM).
+
+**Check**:
+- Verify if the process completed successfully
+- Check log file: `logs/build_posted_aggregates_*.log`
+- Verify output file exists: `aggregates/posted_aggregates.parquet`
+- Review any errors or warnings in the log
+- If completed, verify the aggregates contain expected data (entity_code, dategroupid, hour, posted_median, etc.)
+
+**Process ID**: 33128 (started 5:26:53 AM)
+
+**Next steps after verification**:
+- If successful: Proceed with forecast generation testing
+- If failed: Investigate errors and fix issues (e.g., datetime parsing, data filtering)
+
+---
+
+## Forecast Rounding (DONE)
+
+**Implemented**: Added rounding to forecast generation output:
+- **ACTUAL times**: Rounded to nearest integer (whole minutes) - matches how actual wait times are reported
+- **POSTED times**: Rounded to nearest 5 minutes - matches how posted wait times are displayed on signs/apps
+
+**Location**: `scripts/generate_forecast.py` - rounding applied after predictions are generated, before adding to results DataFrame.
+
+**Verification**: Tested with AK01 - ACTUAL values are now integers (e.g., 5, 6, 7) instead of decimals (e.g., 5.2, 6.8).
 
 ---
 

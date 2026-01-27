@@ -119,6 +119,9 @@ def build_posted_aggregates(
     if logger:
         logger.info(f"Scanning {len(csvs)} fact table CSVs...")
     
+    posted_count = 0
+    processed_count = 0
+    
     for csv_path in csvs:
         try:
             df = pd.read_csv(csv_path, low_memory=False)
@@ -127,6 +130,8 @@ def build_posted_aggregates(
             df_posted = df[df["wait_time_type"] == "POSTED"].copy()
             if df_posted.empty:
                 continue
+            
+            posted_count += len(df_posted)
             
             # Add park_date and park_code
             df_posted = add_park_date(df_posted)
@@ -146,17 +151,20 @@ def build_posted_aggregates(
             
             # Add dategroupid
             df_posted = add_dategroupid(df_posted, dimdategroupid, logger)
+            # Rename pred_dategroupid to dategroupid for consistency
+            if "pred_dategroupid" in df_posted.columns:
+                df_posted = df_posted.rename(columns={"pred_dategroupid": "dategroupid"})
             
             # Extract hour from observed_at
-            observed_dt = pd.to_datetime(df_posted["observed_at"], errors="coerce")
+            observed_dt = pd.to_datetime(df_posted["observed_at"], errors="coerce", utc=True)
             df_posted["hour"] = observed_dt.dt.hour
             
             # Calculate recency weight (same formula as park hours donor)
             # Weight = 1.0 / (1.0 + days_ago / 365.0)
             # More recent dates get higher weight
-            park_date_obj = pd.to_datetime(df_posted["park_date"], errors="coerce").dt.date
-            today = date.today()
-            days_ago = (today - park_date_obj).dt.days
+            park_date_dt = pd.to_datetime(df_posted["park_date"], errors="coerce")
+            today_dt = pd.Timestamp(date.today())
+            days_ago = (today_dt - park_date_dt).days
             df_posted["recency_weight"] = 1.0 / (1.0 + days_ago / 365.0)
             
             # Select columns
@@ -168,6 +176,7 @@ def build_posted_aggregates(
             df_posted = df_posted.rename(columns={"wait_time_minutes": "posted"})
             
             # Filter out nulls
+            before_null_filter = len(df_posted)
             df_posted = df_posted[
                 df_posted["posted"].notna() &
                 df_posted["dategroupid"].notna() &
@@ -177,11 +186,16 @@ def build_posted_aggregates(
             
             if not df_posted.empty:
                 all_posted.append(df_posted)
+                processed_count += len(df_posted)
         
         except Exception as e:
             if logger:
                 logger.debug(f"Error reading {csv_path}: {e}")
             continue
+    
+    if logger:
+        logger.info(f"Found {posted_count:,} POSTED rows across all files")
+        logger.info(f"After processing: {processed_count:,} rows")
     
     if not all_posted:
         if logger:

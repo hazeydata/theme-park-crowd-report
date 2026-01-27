@@ -43,7 +43,7 @@ Critical review of the proposed ACTUAL-curve and WTI methodology, plus a detaile
 - Consider **quantile regression** (e.g. 10th, 50th, 90th percentiles of ACTUAL) for “best/typical/worst” and for WTI uncertainty bands.
 - **Residual monitoring**: Flag (entity, time) with large residuals for ops review (possible breakdown, bad POSTED, or special event).
 
-#### B. PRIORITY in the model
+#### B. STANDBY vs PRIORITY queues
 
 **Issue:** PRIORITY is a different outcome (availability, 8888, return-time minutes). For ACTUAL prediction it could inform, not be the target.
 
@@ -144,11 +144,20 @@ XGBoost supports this with `objective='reg:quantileerror'` and `quantile_alpha` 
                     ▼                                       ▼
 ┌──────────────────────────────────────┐    ┌──────────────────────────────────────────────┐
 │  STAGE B: Train & validate           │    │  STAGE C: POSTED aggregates (required)       │
-│  - **Two models:**                   │    │  - By (entity, dategroupid, hour): median    │
-│    (1) With-POSTED: ACTUAL ~ POSTED  │    │    POSTED. Produces predicted POSTED for   │
-│        + features. Backfill + live.  │    │    forecast — for live comparison and          │
-│    (2) Without-POSTED: ACTUAL ~      │    │    trust. Not used in WTI.                  │
-│        features only. Forecast.      │    └──────────────────────────────────────────────┘
+│  - **Queue type detection:**         │    │  - By (entity, dategroupid, hour): median    │
+│    Check fastpass_booth in dimentity │    │    POSTED. Produces predicted POSTED for   │
+│    to determine STANDBY vs PRIORITY  │    │    forecast — for live comparison and          │
+│  - **STANDBY queues:**               │    │    trust. Not used in WTI.                  │
+│    (1) With-POSTED: ACTUAL ~ POSTED  │    │    (Only for STANDBY queues)                │
+│        + features. Backfill + live.  │    └──────────────────────────────────────────────┘
+│    (2) Without-POSTED: ACTUAL ~      │                         │
+│        features only. Forecast.      │                         │
+│  - **PRIORITY queues:**               │                         │
+│    Without-POSTED: PRIORITY ~        │                         │
+│        features only. Forecast.       │                         │
+│  - **Observation threshold:**         │                         │
+│    ≥ 500 obs: XGBoost models         │                         │
+│    < 500 obs: Mean-based models      │                         │
 │  - Chronological split; val on       │                         │
 │    recent park-days                  │                         │
 │  - Export: joblib + ONNX (optional)  │                         │
@@ -303,7 +312,7 @@ XGBoost supports this with `objective='reg:quantileerror'` and `quantile_alpha` 
 
 1. **Feature layer** — `add_mins_since_6am`, `add_dategroupid`, `add_season`, `add_park_hours` (and `add_geometric_decay` for training). Input: fact + dims. Output: feature-rich rows with `observed_wait_time` for ACTUAL rows.
 2. **Entity-grouped fact and model-ready dataset** — Build entity-grouped fact; join features; define train/val split. Validate with `validate_wait_times` and basic coverage reports.
-3. **Train two XGBoost models** — (1) **With-POSTED:** ACTUAL ~ POSTED + features. (2) **Without-POSTED:** ACTUAL ~ features only. Chronological split; export joblib; evaluate on val. SHAP and residual checks.
+3. **Train models** — Detect queue type (STANDBY vs PRIORITY via `fastpass_booth`). **STANDBY:** (1) With-POSTED: ACTUAL ~ POSTED + features, (2) Without-POSTED: ACTUAL ~ features only. **PRIORITY:** Without-POSTED: PRIORITY ~ features only. **Threshold:** ≥ 500 observations → XGBoost; < 500 → mean-based. Chronological split; evaluate on val. SHAP and residual checks.
 4. **Closed / null convention** — Define and implement: when to set ACTUAL/POSTED to null (TP closed when we have it; queue-times “0 when closed” once we can detect it). Document in schema and validation.
 5. **Backfill** — Historical (entity, park_date), **5‑min slots**, with-POSTED model; merge observed ACTUAL where available; closed → null. Write curves.
 6. **Forecast** — **POSTED aggregates** (entity, dategroupid, hour)→median from fact. Tomorrow → +2 years, **5‑min slots**: **posted_predicted** from aggregates, **actual_predicted** from **without-POSTED** model. Write forecast curves (actual_predicted, posted_predicted).
@@ -320,9 +329,11 @@ XGBoost supports this with `objective='reg:quantileerror'` and `quantile_alpha` 
 - **Closed and null:** Strict **null** when closed. “0 mins” from queue-times when the ride is closed = **false signal** → null. We need: TP “closed” (when we ingest it), queue-times `is_open`/operating (if available), or documented inference rules.
 - **Time slot for curves and WTI:** **5 minutes.** Matches queue-times collection; finer than legacy’s 15 min. We can downsample to 10 or 15 for specific consumers.
 - **Forecast:** **ACTUAL** from features-only (without-POSTED) model. **Predicted POSTED** from (entity, dategroupid, hour) aggregates — for live comparison and trust; **not** used in WTI.
-- **Two ACTUAL models:** With-POSTED (backfill, live) and without-POSTED (forecast).
-- **Predicted POSTED:** Produced for forecast (live comparison and trust); not an input to WTI.
-- **PRIORITY:** v1 ignore in ACTUAL model; v2 for PRIORITY-derived features and separate PRIORITY model.
+- **Queue type distinction:** STANDBY queues (`fastpass_booth = FALSE`) use ACTUAL observations; PRIORITY queues (`fastpass_booth = TRUE`) use PRIORITY observations. STANDBY trains two models (with-POSTED, without-POSTED); PRIORITY trains one model (without-POSTED only, no POSTED equivalent).
+- **Two ACTUAL models (STANDBY only):** With-POSTED (backfill, live) and without-POSTED (forecast).
+- **Predicted POSTED:** Produced for forecast (live comparison and trust); only for STANDBY queues; not an input to WTI.
+- **Observation threshold:** ≥ 500 observations → XGBoost models; < 500 → mean-based models (simple average).
+- **Entity name display:** All entity-related logging includes short names from dimentity (e.g., "AK03 - Greeting Trails") for improved readability.
 - **Quantile regression:** Optional for v2; mean regression is the base.
 
 **Open / to decide when we implement:**

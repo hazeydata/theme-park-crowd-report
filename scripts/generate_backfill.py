@@ -42,6 +42,7 @@ from processors.entity_index import get_all_entities
 from processors.features import PARK_TIMEZONE_MAP, add_features, load_dims
 from processors.park_hours_versioning import get_park_hours_for_date, load_versioned_table
 from processors.training import load_model
+from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
 
 try:
@@ -346,8 +347,21 @@ def predict_actual_with_posted(
             model_type="with_posted",
         )
         
+        # Check if this is a mean model (for entities with < 1000 observations)
+        if model is None and metadata.get("model_type") == "mean":
+            mean_wait_time = metadata.get("mean_wait_time", 0.0)
+            if logger:
+                logger.debug(f"Using mean model for {entity_code}: {mean_wait_time:.2f} minutes")
+            return max(0.0, float(mean_wait_time))
+        
+        # XGBoost model path
+        if model is None:
+            if logger:
+                logger.debug(f"Model not found for {entity_code} (with-POSTED)")
+            return None
+        
         # Get feature columns from metadata
-        feature_cols = metadata.get("feature_columns", [])
+        feature_cols = metadata.get("feature_names", metadata.get("feature_columns", []))
         if not feature_cols:
             if logger:
                 logger.warning(f"No feature columns in metadata for {entity_code}")
@@ -675,7 +689,8 @@ def main() -> None:
     # Get entities
     if args.entity:
         entities = [args.entity]
-        logger.info(f"Processing single entity: {args.entity}")
+        entity_display = format_entity_display(args.entity, base)
+        logger.info(f"Processing single entity: {entity_display}")
     else:
         logger.info("Loading entities from entity index...")
         index_db = base / "state" / "entity_index.sqlite"
@@ -716,7 +731,8 @@ def main() -> None:
     total_failed = 0
     
     for entity_code in entities:
-        logger.info(f"Processing entity: {entity_code}")
+        entity_display = format_entity_display(entity_code, base)
+        logger.info(f"Processing entity: {entity_display}")
         
         entity_dates_processed = 0
         entity_dates_saved = 0
@@ -743,11 +759,11 @@ def main() -> None:
                 total_processed += 1
                 
             except Exception as e:
-                logger.error(f"Error processing {entity_code} {park_date}: {e}", exc_info=True)
+                logger.error(f"Error processing {entity_display} {park_date}: {e}", exc_info=True)
                 total_failed += 1
                 total_processed += 1
         
-        logger.info(f"  Entity {entity_code}: {entity_dates_saved}/{entity_dates_processed} dates saved")
+        logger.info(f"  Entity {entity_display}: {entity_dates_saved}/{entity_dates_processed} dates saved")
     
     logger.info("")
     logger.info("Backfill generation complete")

@@ -47,6 +47,17 @@ Primary table with versioned park hours:
 - `(park_date, park_code, version_type, valid_until)` - for querying current version
 - `(park_date, park_code, created_at)` - for version history
 
+**Data quality – blank datetime columns**: 
+- **Core times** (`opening_time`, `closing_time`): Must never be missing. Blank/null values are filled with default `1999-01-01T00:00:00-08:00` (Pacific UTC-8).
+- **EMH-specific times** (`opening_time_with_emh`, `closing_time_with_emh_or_party`): 
+  - If missing **and no EMH**: Use regular opening/closing time (semantically correct - no EMH means EMH time = regular time)
+  - If missing **and EMH exists**: Use default `1999-01-01T00:00:00-08:00` (data quality issue - should have EMH time when EMH is scheduled)
+  
+This logic is applied in:
+- `clean_dimparkhours.py` when cleaning the flat dimparkhours
+- `get_park_hours_from_s3.py` when writing official versions into the versioned table
+- `park_hours_versioning.py` in `get_park_hours_for_date` (when returning) and in `create_predicted_version_from_donor` (when copying from a donor)
+
 #### `dimension_tables/dimparkhours_metadata.csv`
 
 Metadata about versioning rules and change patterns:

@@ -106,6 +106,7 @@ EARLY_STOPPING_ROUNDS = 10
 def prepare_training_data(
     df: pd.DataFrame,
     include_posted: bool = True,
+    target_wait_type: str = "ACTUAL",
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[pd.DataFrame, pd.Series, list[str]]:
     """
@@ -113,17 +114,24 @@ def prepare_training_data(
     
     Args:
         df: DataFrame with features and encoded categoricals
-        include_posted: If True, include POSTED wait_time_minutes as feature
+        include_posted: If True, include POSTED wait_time_minutes as feature (only for STANDBY queues)
+        target_wait_type: Target wait time type - "ACTUAL" for standby queues, "PRIORITY" for priority queues
         logger: Optional logger
     
     Returns:
         Tuple of (X, y, feature_names)
     """
-    # Filter to ACTUAL wait times only (our target)
-    df_actual = df[df["wait_time_type"] == "ACTUAL"].copy()
+    # Filter to target wait times (ACTUAL for standby, PRIORITY for priority queues)
+    df_target = df[df["wait_time_type"] == target_wait_type].copy()
     
-    if df_actual.empty:
-        raise ValueError("No ACTUAL wait times found in data")
+    if df_target.empty:
+        raise ValueError(f"No {target_wait_type} wait times found in data")
+    
+    # For PRIORITY queues, there's no POSTED equivalent - disable include_posted
+    if target_wait_type == "PRIORITY":
+        include_posted = False
+        if logger:
+            logger.info("PRIORITY queue detected - training without POSTED feature")
     
     # Select features
     feature_cols = [
@@ -145,11 +153,11 @@ def prepare_training_data(
         "pred_emh_evening",
     ]
     for col in park_hours_cols:
-        if col in df_actual.columns:
+        if col in df_target.columns:
             feature_cols.append(col)
     
-    # Add POSTED if requested
-    if include_posted:
+    # Add POSTED if requested (only for STANDBY queues with ACTUAL target)
+    if include_posted and target_wait_type == "ACTUAL":
         # For with-POSTED model, we need POSTED values
         # Strategy: Join POSTED to ACTUAL rows by matching entity_code and park_date
         # Use the closest POSTED time to each ACTUAL time (within same park_date)
@@ -162,11 +170,11 @@ def prepare_training_data(
                 df_posted = add_park_date(df_posted)
             
             # Merge POSTED to ACTUAL: for each ACTUAL row, find closest POSTED
-            df_actual_with_posted = df_actual.copy()
-            df_actual_with_posted["posted_wait_time"] = None
+            df_target_with_posted = df_target.copy()
+            df_target_with_posted["posted_wait_time"] = pd.NA  # Use pd.NA for nullable float
             
             # Group by entity and park_date for efficiency
-            for (entity, park_date), group in df_actual_with_posted.groupby(["entity_code", "park_date"]):
+            for (entity, park_date), group in df_target_with_posted.groupby(["entity_code", "park_date"]):
                 # Get POSTED for this entity and park_date
                 posted_subset = df_posted[
                     (df_posted["entity_code"] == entity) &
@@ -187,9 +195,10 @@ def prepare_training_data(
                     
                     time_diffs = (posted_times - group_times.loc[idx]).abs()
                     closest_idx = time_diffs.idxmin()
-                    df_actual_with_posted.loc[idx, "posted_wait_time"] = posted_subset.loc[closest_idx, "wait_time_minutes"]
+                    posted_value = posted_subset.loc[closest_idx, "wait_time_minutes"]
+                    df_target_with_posted.loc[idx, "posted_wait_time"] = float(posted_value) if pd.notna(posted_value) else pd.NA
             
-            df_actual = df_actual_with_posted
+            df_target = df_target_with_posted
             feature_cols.append("posted_wait_time")
         else:
             if logger:
@@ -197,8 +206,8 @@ def prepare_training_data(
             include_posted = False
     
     # Select only available feature columns
-    available_features = [col for col in feature_cols if col in df_actual.columns]
-    missing_features = [col for col in feature_cols if col not in df_actual.columns]
+    available_features = [col for col in feature_cols if col in df_target.columns]
+    missing_features = [col for col in feature_cols if col not in df_target.columns]
     
     if missing_features and logger:
         logger.warning(f"Missing features: {missing_features}")
@@ -207,8 +216,8 @@ def prepare_training_data(
         raise ValueError("No features available for training")
     
     # Extract X and y
-    X = df_actual[available_features].copy()
-    y = df_actual["observed_wait_time"].copy()
+    X = df_target[available_features].copy()
+    y = df_target["observed_wait_time"].copy()
     
     # Drop rows with null target
     mask = y.notna()
@@ -222,6 +231,11 @@ def prepare_training_data(
     for col in X.columns:
         if X[col].dtype == bool:
             X[col] = X[col].astype(int)
+    
+    # Ensure posted_wait_time is numeric (convert from object if needed)
+    if "posted_wait_time" in X.columns:
+        if X["posted_wait_time"].dtype == "object":
+            X["posted_wait_time"] = pd.to_numeric(X["posted_wait_time"], errors="coerce")
     
     # Fill remaining nulls with median (for numeric) or mode (for categorical)
     for col in X.columns:
@@ -447,13 +461,74 @@ def save_model(
     return model_path
 
 
+def save_mean_model(
+    entity_code: str,
+    output_base: Path,
+    mean_wait_time: float,
+    observation_count: int,
+    logger: Optional[logging.Logger] = None,
+) -> Path:
+    """
+    Save a mean-based model for entities with insufficient observations.
+    
+    For entities with < 1000 ACTUAL observations, we use a simple mean model
+    that always predicts the mean wait time.
+    
+    Args:
+        entity_code: Entity code
+        output_base: Pipeline output base directory
+        mean_wait_time: Mean ACTUAL wait time (minutes)
+        observation_count: Number of ACTUAL observations used to calculate mean
+        logger: Optional logger
+    
+    Returns:
+        Path to saved metadata file
+    """
+    model_dir = output_base / "models" / entity_code
+    model_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save metadata for both model types (mean model works for both)
+    base_metadata = {
+        "entity_code": entity_code,
+        "mean_wait_time": float(mean_wait_time),
+        "observation_count": int(observation_count),
+        "created_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "feature_names": [],  # No features needed for mean model
+        "metrics": {
+            "model_type": "mean",
+            "mean_wait_time": float(mean_wait_time),
+        },
+    }
+    
+    # Save for both model types (they're the same for mean models)
+    saved_path = None
+    for model_type in ["with_posted", "without_posted"]:
+        metadata = base_metadata.copy()
+        metadata["model_type"] = "mean"  # Keep as "mean" to indicate it's a mean model
+        metadata["model_type_name"] = model_type  # Track which type this metadata file is for
+        
+        metadata_path = model_dir / f"metadata_{model_type}.json"
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        
+        if logger:
+            logger.info(f"Saved mean model metadata: {metadata_path}")
+        
+        if saved_path is None:
+            saved_path = metadata_path
+    
+    return saved_path
+
+
 def load_model(
     entity_code: str,
     output_base: Path,
     model_type: str,
-) -> Tuple[xgb.XGBRegressor, Dict]:
+) -> Tuple[Optional[xgb.XGBRegressor], Dict]:
     """
     Load trained model and metadata.
+    
+    Returns mean model metadata if XGBoost model doesn't exist.
     
     Args:
         entity_code: Entity code
@@ -462,13 +537,25 @@ def load_model(
     
     Returns:
         Tuple of (model, metadata)
+        - model: XGBoost model if available, None if mean model
+        - metadata: Model metadata (includes "model_type": "mean" for mean models)
     """
-    if xgb is None:
-        raise ImportError("XGBoost not installed. Install with: pip install xgboost")
-    
     model_dir = output_base / "models" / entity_code
     model_path = model_dir / f"model_{model_type}.json"
     metadata_path = model_dir / f"metadata_{model_type}.json"
+    
+    # Check if mean model exists (metadata only, no XGBoost file)
+    if metadata_path.exists() and not model_path.exists():
+        # Load mean model metadata
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+        
+        if metadata.get("model_type") == "mean":
+            return None, metadata  # None model, mean metadata
+    
+    # Load XGBoost model
+    if xgb is None:
+        raise ImportError("XGBoost not installed. Install with: pip install xgboost")
     
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
@@ -498,6 +585,7 @@ def train_entity_model(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     xgb_params: Optional[Dict] = None,
+    target_wait_type: str = "ACTUAL",
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Dict[str, xgb.XGBRegressor], Dict[str, Dict[str, float]]]:
     """
@@ -510,11 +598,12 @@ def train_entity_model(
         train_ratio: Training set proportion (default: 0.7)
         val_ratio: Validation set proportion (default: 0.15)
         xgb_params: Optional XGBoost parameters
+        target_wait_type: Target wait time type - "ACTUAL" for standby queues, "PRIORITY" for priority queues
         logger: Optional logger
     
     Returns:
         Tuple of (models_dict, metrics_dict)
-        models_dict: {"with_posted": model, "without_posted": model}
+        models_dict: {"with_posted": model, "without_posted": model} (for PRIORITY, only "without_posted")
         metrics_dict: {"with_posted": metrics, "without_posted": metrics}
     """
     if xgb is None:
@@ -537,55 +626,68 @@ def train_entity_model(
     models = {}
     all_metrics = {}
     
-    # Train with-POSTED model
-    try:
-        if logger:
-            logger.info("Training with-POSTED model...")
-        
-        X_train, y_train, feature_names = prepare_training_data(
-            train_df,
-            include_posted=True,
-            logger=logger,
-        )
-        X_val, y_val, _ = prepare_training_data(
-            val_df,
-            include_posted=True,
-            logger=logger,
-        )
-        X_test, y_test, _ = prepare_training_data(
-            test_df,
-            include_posted=True,
-            logger=logger,
-        )
-        
-        model_with = train_xgb_model(
-            X_train, y_train, X_val, y_val,
-            params=xgb_params,
-            logger=logger,
-        )
-        
-        # Evaluate on test set
-        test_metrics = evaluate_model(model_with, X_test, y_test, logger)
-        
-        # Save model
-        save_model(
-            model_with,
-            entity_code,
-            output_base,
-            "with_posted",
-            feature_names,
-            test_metrics,
-            logger,
-        )
-        
-        models["with_posted"] = model_with
-        all_metrics["with_posted"] = test_metrics
-        
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to train with-POSTED model: {e}")
+    # For PRIORITY queues, only train without-POSTED model (no POSTED equivalent)
+    train_with_posted = target_wait_type == "ACTUAL"
+    
+    # Train with-POSTED model (only for STANDBY queues)
+    if train_with_posted:
+        try:
+            if logger:
+                logger.info("Training with-POSTED model...")
+            
+            X_train, y_train, feature_names = prepare_training_data(
+                train_df,
+                include_posted=True,
+                target_wait_type=target_wait_type,
+                logger=logger,
+            )
+            X_val, y_val, _ = prepare_training_data(
+                val_df,
+                include_posted=True,
+                target_wait_type=target_wait_type,
+                logger=logger,
+            )
+            X_test, y_test, _ = prepare_training_data(
+                test_df,
+                include_posted=True,
+                target_wait_type=target_wait_type,
+                logger=logger,
+            )
+            
+            model_with = train_xgb_model(
+                X_train, y_train, X_val, y_val,
+                params=xgb_params,
+                logger=logger,
+            )
+            
+            # Evaluate on test set
+            test_metrics = evaluate_model(model_with, X_test, y_test, logger)
+            
+            # Save model
+            save_model(
+                model_with,
+                entity_code,
+                output_base,
+                "with_posted",
+                feature_names,
+                test_metrics,
+                logger,
+            )
+            
+            models["with_posted"] = model_with
+            all_metrics["with_posted"] = test_metrics
+            
+        except Exception as e:
+            if logger:
+                logger.error(f"Failed to train with-POSTED model: {e}")
+            models["with_posted"] = None
+            all_metrics["with_posted"] = {}
+    else:
+        # For PRIORITY queues, skip with-POSTED model
         models["with_posted"] = None
         all_metrics["with_posted"] = {}
+        if logger:
+            logger.info("Skipping with-POSTED model (PRIORITY queue - no POSTED equivalent)")
     
     # Train without-POSTED model
     try:
@@ -595,16 +697,19 @@ def train_entity_model(
         X_train, y_train, feature_names = prepare_training_data(
             train_df,
             include_posted=False,
+            target_wait_type=target_wait_type,
             logger=logger,
         )
         X_val, y_val, _ = prepare_training_data(
             val_df,
             include_posted=False,
+            target_wait_type=target_wait_type,
             logger=logger,
         )
         X_test, y_test, _ = prepare_training_data(
             test_df,
             include_posted=False,
+            target_wait_type=target_wait_type,
             logger=logger,
         )
         

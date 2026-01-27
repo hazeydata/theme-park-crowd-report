@@ -24,6 +24,7 @@ from processors.encoding import encode_features
 from processors.entity_index import load_entity_data, mark_entity_modeled
 from processors.features import add_features
 from processors.training import train_entity_model
+from utils.entity_names import format_entity_display, is_priority_queue
 from utils.paths import get_output_base
 
 
@@ -85,15 +86,22 @@ def main() -> None:
         type=int,
         help="Use only first N rows for testing (speeds up training significantly)",
     )
+    ap.add_argument(
+        "--skip-park-hours",
+        action="store_true",
+        help="Skip park hours features (faster, but less accurate)",
+    )
     args = ap.parse_args()
 
     base = args.output_base.resolve()
     log_dir = base / "logs"
     logger = setup_logging(log_dir)
     index_db = base / "state" / "entity_index.sqlite"
+    
+    entity_display = format_entity_display(args.entity, base)
 
     logger.info("=" * 60)
-    logger.info(f"Training models for entity: {args.entity}")
+    logger.info(f"Training models for entity: {entity_display}")
     logger.info("=" * 60)
     logger.info(f"Output base: {base}")
     logger.info(f"Train ratio: {args.train_ratio}, Val ratio: {args.val_ratio}")
@@ -103,10 +111,52 @@ def main() -> None:
     df = load_entity_data(args.entity, base, db_path=index_db, logger=logger)
     
     if df.empty:
-        logger.error(f"No data found for entity {args.entity}")
+        logger.error(f"No data found for entity {entity_display}")
         sys.exit(1)
     
     logger.info(f"Loaded {len(df):,} rows")
+    
+    # Determine queue type: PRIORITY (fastpass_booth=TRUE) or STANDBY (fastpass_booth=FALSE)
+    is_priority = is_priority_queue(args.entity, base)
+    queue_type = "PRIORITY" if is_priority else "STANDBY"
+    target_wait_type = "PRIORITY" if is_priority else "ACTUAL"
+    
+    logger.info(f"Queue type: {queue_type} (fastpass_booth={is_priority})")
+    
+    # Check observation count for the appropriate wait time type
+    df_target = df[df["wait_time_type"] == target_wait_type]
+    target_count = len(df_target)
+    logger.info(f"{target_wait_type} observations: {target_count:,}")
+    
+    MIN_OBSERVATIONS_FOR_TRAINING = 500
+    
+    if target_count < MIN_OBSERVATIONS_FOR_TRAINING:
+        logger.info(f"Entity has {target_count:,} {target_wait_type} observations (< {MIN_OBSERVATIONS_FOR_TRAINING})")
+        logger.info("Creating mean-based model instead of XGBoost model...")
+        
+        # Calculate mean wait time from target observations
+        if target_count > 0:
+            mean_wait_time = float(df_target["wait_time_minutes"].mean())
+            logger.info(f"Mean {target_wait_type} wait time: {mean_wait_time:.2f} minutes")
+        else:
+            logger.warning(f"No {target_wait_type} observations found - using default mean of 0")
+            mean_wait_time = 0.0
+        
+        # Save mean model
+        from processors.training import save_mean_model
+        save_mean_model(
+            args.entity,
+            base,
+            mean_wait_time,
+            target_count,
+            logger=logger,
+        )
+        
+        # Mark entity as modeled
+        mark_entity_modeled(args.entity, index_db)
+        logger.info(f"\nMarked {entity_display} as modeled (mean-based)")
+        logger.info("\nDone!")
+        sys.exit(0)
     
     # Sample data if requested (for faster testing)
     if args.sample and args.sample > 0:
@@ -116,7 +166,7 @@ def main() -> None:
 
     # Add features
     logger.info("Adding features...")
-    df_features = add_features(df, base, logger=logger)
+    df_features = add_features(df, base, logger=logger, include_park_hours=not args.skip_park_hours)
     
     if df_features.empty:
         logger.error("No data after feature engineering")
@@ -131,6 +181,7 @@ def main() -> None:
             df_features,
             base,
             strategy="label",
+            handle_unknown="encode",  # Allow new values to be encoded with new IDs
             logger=logger,
         )
         logger.info(f"Encoded {len(mappings)} categorical columns")
@@ -147,6 +198,7 @@ def main() -> None:
             base,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
+            target_wait_type=target_wait_type,
             logger=logger,
         )
         
@@ -165,8 +217,8 @@ def main() -> None:
                     logger.info(f"  MAPE: {model_metrics.get('mape', 'N/A'):.2f}%")
         
         # Mark entity as modeled
-        mark_entity_modeled(args.entity, index_db, logger=logger)
-        logger.info(f"\nMarked {args.entity} as modeled in entity index")
+        mark_entity_modeled(args.entity, index_db)
+        logger.info(f"\nMarked {entity_display} as modeled in entity index")
         
         logger.info("\nDone!")
         

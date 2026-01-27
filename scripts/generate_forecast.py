@@ -43,6 +43,7 @@ from processors.features import PARK_TIMEZONE_MAP, add_features, load_dims
 from processors.park_hours_versioning import get_park_hours_for_date, load_versioned_table
 from processors.posted_aggregates import get_predicted_posted_5min_slots, load_posted_aggregates
 from processors.training import load_model
+from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
 
 try:
@@ -199,7 +200,6 @@ def build_features_for_time_slot(
     df_features = add_features(
         fact_row,
         output_base,
-        dims=dims,
         logger=logger,
     )
     
@@ -207,7 +207,7 @@ def build_features_for_time_slot(
 
 
 def predict_actual_for_time_slot(
-    df_features: pd.DataFrame,
+    df_features: Optional[pd.DataFrame],
     entity_code: str,
     output_base: Path,
     logger: Optional[logging.Logger] = None,
@@ -237,8 +237,26 @@ def predict_actual_for_time_slot(
             model_type="without_posted",
         )
         
-        # Get feature columns from metadata
-        feature_cols = metadata.get("feature_columns", [])
+        # Check if this is a mean model (for entities with < 1000 observations)
+        if model is None and metadata.get("model_type") == "mean":
+            mean_wait_time = metadata.get("mean_wait_time", 0.0)
+            if logger:
+                logger.debug(f"Using mean model for {entity_code}: {mean_wait_time:.2f} minutes")
+            return max(0.0, float(mean_wait_time))
+        
+        # XGBoost model path - requires features
+        if model is None:
+            if logger:
+                logger.debug(f"Model not found for {entity_code} (without-POSTED)")
+            return None
+        
+        if df_features is None:
+            if logger:
+                logger.warning(f"Features required for XGBoost model but df_features is None")
+            return None
+        
+        # Get feature columns from metadata (uses "feature_names" key)
+        feature_cols = metadata.get("feature_names", metadata.get("feature_columns", []))
         if not feature_cols:
             if logger:
                 logger.warning(f"No feature columns in metadata for {entity_code}")
@@ -324,28 +342,113 @@ def generate_forecast_for_entity_date(
     park_code_lower = park_code.lower()
     park_timezone = PARK_TIMEZONE_MAP.get(park_code_lower, "America/New_York")
     
-    # Get park hours
+    # Get park hours (try versioned table first, fallback to regular dimparkhours)
     versioned_df = load_versioned_table(output_base)
-    if versioned_df is None:
-        if logger:
-            logger.warning(f"Versioned park hours table not found for {entity_code} {park_date}")
-        return None
+    hours = None
     
-    hours = get_park_hours_for_date(
-        park_date,
-        park_code,
-        versioned_df,
-        as_of=datetime.now(ZoneInfo("UTC")),
-        logger=logger,
-    )
+    if versioned_df is not None:
+        # Use versioned table
+        hours = get_park_hours_for_date(
+            park_date,
+            park_code,
+            versioned_df,
+            as_of=datetime.now(ZoneInfo("UTC")),
+            logger=logger,
+        )
+    
+    if hours is None:
+        # Fallback to regular dimparkhours.csv
+        if logger:
+            logger.debug(f"Versioned park hours not available, using regular dimparkhours.csv")
+        
+        dimparkhours_path = output_base / "dimension_tables" / "dimparkhours.csv"
+        if not dimparkhours_path.exists():
+            if logger:
+                logger.warning(f"Park hours table not found for {entity_code} {park_date}")
+            return None
+        
+        try:
+            dimparkhours = pd.read_csv(dimparkhours_path, low_memory=False)
+            park_date_str = park_date.strftime("%Y-%m-%d")
+            park_code_upper = park_code.upper()
+            
+            # Find date and park columns (dimparkhours uses "date" and "park")
+            date_col = None
+            for col in ["date", "park_date", "park_day_id"]:
+                if col in dimparkhours.columns:
+                    date_col = col
+                    break
+            
+            park_col = None
+            for col in ["park", "park_code", "code"]:
+                if col in dimparkhours.columns:
+                    park_col = col
+                    break
+            
+            if not date_col or not park_col:
+                if logger:
+                    logger.error(f"dimparkhours.csv missing required columns (date, park)")
+                return None
+            
+            # Find matching row
+            mask = (
+                (pd.to_datetime(dimparkhours[date_col], errors="coerce").dt.strftime("%Y-%m-%d") == park_date_str) &
+                (dimparkhours[park_col].astype(str).str.upper() == park_code_upper)
+            )
+            matching = dimparkhours[mask]
+            
+            if matching.empty:
+                if logger:
+                    logger.debug(f"No park hours for {park_code} {park_date}")
+                return None
+            
+            # Use first match
+            row = matching.iloc[0]
+            
+            # Extract time strings (handle ISO8601 format)
+            opening_time_raw = row.get("opening_time", "09:00")
+            closing_time_raw = row.get("closing_time", "22:00")
+            
+            # Parse ISO8601 datetime strings to extract HH:MM
+            def extract_time(time_val):
+                if pd.isna(time_val):
+                    return "09:00"
+                time_str = str(time_val)
+                if "T" in time_str:
+                    # ISO8601 format: extract HH:MM from "2004-01-01T08:00:00-08:00"
+                    parts = time_str.split("T")
+                    if len(parts) > 1:
+                        time_part = parts[1].split("-")[0].split("+")[0]
+                        return time_part[:5]  # HH:MM
+                elif ":" in time_str:
+                    return time_str[:5]  # Already HH:MM
+                return "09:00"  # Default
+            
+            hours = {
+                "opening_time": extract_time(opening_time_raw),
+                "closing_time": extract_time(closing_time_raw),
+                "emh_morning": bool(row.get("emh_morning", False)),
+                "emh_evening": bool(row.get("emh_evening", False)),
+            }
+        except Exception as e:
+            if logger:
+                logger.error(f"Error reading dimparkhours.csv: {e}", exc_info=True)
+            return None
     
     if not hours:
         if logger:
             logger.debug(f"No park hours for {park_code} {park_date}")
         return None
     
+    # Extract time strings (handle ISO8601 or HH:MM format)
     park_open_time = hours.get("opening_time", "09:00")
     park_close_time = hours.get("closing_time", "22:00")
+    
+    # If ISO8601 format, extract HH:MM
+    if "T" in str(park_open_time):
+        park_open_time = str(park_open_time).split("T")[-1].split(" ")[-1][:5]
+    if "T" in str(park_close_time):
+        park_close_time = str(park_close_time).split("T")[-1].split(" ")[-1][:5]
     
     # Generate time slots
     time_slots = generate_time_slots(park_open_time, park_close_time)
@@ -375,41 +478,71 @@ def generate_forecast_for_entity_date(
         # Get predicted POSTED
         posted_predicted = posted_lookup.get(time_slot)
         
-        # Build features
-        df_features = build_features_for_time_slot(
-            entity_code,
-            park_date,
-            hour,
-            minute,
-            park_code,
-            park_timezone,
-            dims,
-            output_base,
-            logger,
-        )
-        
-        # Encode features
-        if encoding_mappings:
-            df_encoded, _ = encode_features(
-                df_features,
+        # Check if this is a mean model (skip feature building/encoding if so)
+        try:
+            from processors.training import load_model
+            _, metadata_check = load_model(
+                entity_code,
                 output_base,
-                strategy=encoding_mappings.get("strategy", "label"),
-                mappings=encoding_mappings,
+                model_type="without_posted",
+            )
+            is_mean_model = metadata_check.get("model_type") == "mean"
+        except (FileNotFoundError, Exception):
+            is_mean_model = False
+        
+        if is_mean_model:
+            # For mean models, we can predict directly without features/encoding
+            actual_predicted = predict_actual_for_time_slot(
+                None,  # No features needed for mean model
+                entity_code,
+                output_base,
+                logger,
             )
         else:
-            df_encoded, _ = encode_features(
-                df_features,
+            # Build features
+            df_features = build_features_for_time_slot(
+                entity_code,
+                park_date,
+                hour,
+                minute,
+                park_code,
+                park_timezone,
+                dims,
                 output_base,
-                strategy="label",
+                logger,
+            )
+            
+            # Encode features
+            if encoding_mappings:
+                df_encoded, _ = encode_features(
+                    df_features,
+                    output_base,
+                    strategy=encoding_mappings.get("strategy", "label"),
+                    mappings=encoding_mappings,
+                )
+            else:
+                df_encoded, _ = encode_features(
+                    df_features,
+                    output_base,
+                    strategy="label",
+                )
+            
+            # Predict ACTUAL
+            actual_predicted = predict_actual_for_time_slot(
+                df_encoded,
+                entity_code,
+                output_base,
+                logger,
             )
         
-        # Predict ACTUAL
-        actual_predicted = predict_actual_for_time_slot(
-            df_encoded,
-            entity_code,
-            output_base,
-            logger,
-        )
+        # Round predictions to match real-world display conventions
+        # ACTUAL: round to nearest integer (whole minutes) - matches how actual wait times are reported
+        if actual_predicted is not None and pd.notna(actual_predicted):
+            actual_predicted = int(round(actual_predicted))
+        
+        # POSTED: round to nearest 5 minutes - matches how posted wait times are displayed on signs/apps
+        if posted_predicted is not None and pd.notna(posted_predicted):
+            posted_predicted = round(posted_predicted / 5.0) * 5.0
         
         # Only add if we have at least one prediction
         if actual_predicted is not None or posted_predicted is not None:
@@ -550,7 +683,8 @@ def main() -> None:
     # Get entities
     if args.entity:
         entities = [args.entity]
-        logger.info(f"Processing single entity: {args.entity}")
+        entity_display = format_entity_display(args.entity, base)
+        logger.info(f"Processing single entity: {entity_display}")
     else:
         logger.info("Loading entities from entity index...")
         index_db = base / "state" / "entity_index.sqlite"
@@ -591,7 +725,8 @@ def main() -> None:
     total_failed = 0
     
     for entity_code in entities:
-        logger.info(f"Processing entity: {entity_code}")
+        entity_display = format_entity_display(entity_code, base)
+        logger.info(f"Processing entity: {entity_display}")
         
         entity_dates_processed = 0
         entity_dates_saved = 0
@@ -619,11 +754,11 @@ def main() -> None:
                 total_processed += 1
                 
             except Exception as e:
-                logger.error(f"Error processing {entity_code} {park_date}: {e}", exc_info=True)
+                logger.error(f"Error processing {entity_display} {park_date}: {e}", exc_info=True)
                 total_failed += 1
                 total_processed += 1
         
-        logger.info(f"  Entity {entity_code}: {entity_dates_saved}/{entity_dates_processed} dates saved")
+        logger.info(f"  Entity {entity_display}: {entity_dates_saved}/{entity_dates_processed} dates saved")
     
     logger.info("")
     logger.info("Forecast generation complete")

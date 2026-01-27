@@ -84,6 +84,8 @@ PARK_HOURS_FILES = [
 ]
 
 DIMPARKHOURS_NAME = "dimparkhours.csv"
+# Default for blank datetime columns when updating versioned table (Pacific UTC-8)
+DEFAULT_DATETIME_BLANK = "1999-01-01T00:00:00-08:00"
 MAX_RETRIES = 3
 RETRY_WAIT = [1, 2, 4]
 
@@ -283,8 +285,10 @@ def main() -> None:
                                 continue
                             
                             park_code = str(row[park_col]).upper().strip()
-                            opening_time = str(row[open_col]).strip()
-                            closing_time = str(row[close_col]).strip()
+                            _ot = row[open_col]
+                            _ct = row[close_col]
+                            opening_time = (str(_ot).strip() if pd.notna(_ot) and str(_ot).strip() and str(_ot).strip().lower() != "nan" else DEFAULT_DATETIME_BLANK)
+                            closing_time = (str(_ct).strip() if pd.notna(_ct) and str(_ct).strip() and str(_ct).strip().lower() != "nan" else DEFAULT_DATETIME_BLANK)
                             emh_morning = bool(row.get("emh_morning", False))
                             emh_evening = bool(row.get("emh_evening", False))
                             

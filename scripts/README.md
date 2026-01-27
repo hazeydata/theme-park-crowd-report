@@ -169,6 +169,49 @@ python scripts/check_prerequisites.py --output-base "D:\\Path"
 
 **Options**: `--output-base`, `--install-missing` (install missing packages), `--min-models` (default: 1).
 
+### `train_entity_model.py`
+
+Trains XGBoost models for a single entity. Automatically detects queue type (STANDBY vs PRIORITY via `fastpass_booth` in dimentity) and uses appropriate wait time observations:
+- **STANDBY queues** (`fastpass_booth = FALSE`): Uses ACTUAL observations, trains both with-POSTED and without-POSTED models
+- **PRIORITY queues** (`fastpass_booth = TRUE`): Uses PRIORITY observations, trains only without-POSTED model (no POSTED equivalent)
+
+**Observation threshold:** Entities with ≥ 500 observations get XGBoost models; entities with < 500 observations get mean-based models (simple average).
+
+**Usage:**
+```powershell
+python scripts/train_entity_model.py --entity AK01
+python scripts/train_entity_model.py --entity MK101 --output-base "D:\Path"
+python scripts/train_entity_model.py --entity AK01 --sample 10000  # Faster testing
+```
+
+**Options**: `--entity` (required), `--output-base`, `--train-ratio` (default: 0.7), `--val-ratio` (default: 0.15), `--skip-encoding`, `--sample` (for testing), `--skip-park-hours`.
+
+### `train_batch_entities.py`
+
+Batch trains models for multiple entities. Can query entity index for entities needing training, or train a specified list.
+
+**Usage:**
+```powershell
+# Train all entities that need modeling (from entity index)
+python scripts/train_batch_entities.py
+
+# Train specific entities
+python scripts/train_batch_entities.py --entities MK101 MK102 AK01
+
+# Train entities from a file (one entity code per line)
+python scripts/train_batch_entities.py --entity-list entities.txt
+
+# Train only entities with data at least 24 hours old
+python scripts/train_batch_entities.py --min-age-hours 24
+
+# Limit number of entities to train
+python scripts/train_batch_entities.py --max-entities 10
+```
+
+**Options**: `--entities`, `--entity-list`, `--output-base`, `--min-age-hours` (default: 0), `--max-entities`, `--train-ratio`, `--val-ratio`, `--skip-encoding`, `--sample`, `--skip-park-hours`, `--min-observations` (default: 500), `--python`.
+
+**Note:** All entity-related logging includes short names from dimentity (e.g., "AK03 - Greeting Trails") for improved readability.
+
 ### `test_modeling_pipeline.py`
 
 Tests the complete modeling pipeline (forecast, backfill, WTI) with a small subset of entities and dates. Useful for validating the pipeline before running on full datasets.

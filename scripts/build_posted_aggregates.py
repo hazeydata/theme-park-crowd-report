@@ -18,11 +18,15 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+# Add src to path
+if str(Path(__file__).parent.parent / "src") not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from processors.posted_aggregates import (
     build_posted_aggregates,
     save_posted_aggregates,
 )
-from utils import get_output_base
+from utils.paths import get_output_base
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:

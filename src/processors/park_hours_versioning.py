@@ -64,6 +64,9 @@ VERSION_TYPES = {
 # Days before date when official hours are considered "final" (unlikely to change)
 FINAL_DAYS_THRESHOLD = 7
 
+# Default for blank datetime columns (Pacific UTC-8). Ensures opening/closing_time are never null.
+DEFAULT_DATETIME_BLANK = "1999-01-01T00:00:00-08:00"
+
 
 # =============================================================================
 # LOAD VERSIONED TABLE
@@ -166,11 +169,15 @@ def get_park_hours_for_date(
         ascending=[True, False]
     )
     
-    # Return best match
+    # Return best match; ensure opening/closing_time are never blank (data quality)
     best = candidates.iloc[0]
+    _ot = best.get("opening_time")
+    _ct = best.get("closing_time")
+    opening = _ot if (_ot is not None and str(_ot).strip() and str(_ot).strip().lower() != "nan") else DEFAULT_DATETIME_BLANK
+    closing = _ct if (_ct is not None and str(_ct).strip() and str(_ct).strip().lower() != "nan") else DEFAULT_DATETIME_BLANK
     result = {
-        "opening_time": best.get("opening_time"),
-        "closing_time": best.get("closing_time"),
+        "opening_time": opening,
+        "closing_time": closing,
         "emh_morning": bool(best.get("emh_morning", False)),
         "emh_evening": bool(best.get("emh_evening", False)),
         "version_type": best.get("version_type"),
@@ -431,9 +438,11 @@ def create_predicted_version_from_donor(
             "confidence", "change_probability", "notes"
         ])
     
-    # Get hours from donor
-    opening_time = donor.get("opening_time")
-    closing_time = donor.get("closing_time")
+    # Get hours from donor; use default if blank (data quality)
+    _ot = donor.get("opening_time")
+    _ct = donor.get("closing_time")
+    opening_time = _ot if (_ot is not None and str(_ot).strip() and str(_ot).strip().lower() != "nan") else DEFAULT_DATETIME_BLANK
+    closing_time = _ct if (_ct is not None and str(_ct).strip() and str(_ct).strip().lower() != "nan") else DEFAULT_DATETIME_BLANK
     emh_morning = bool(donor.get("emh_morning", False))
     emh_evening = bool(donor.get("emh_evening", False))
     

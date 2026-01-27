@@ -67,6 +67,28 @@ if str(Path(__file__).parent.parent) not in sys.path:
 
 from get_tp_wait_time_data_from_s3 import PARK_CODE_MAP, derive_park_date, get_park_code
 
+# Default datetime value used for missing park hours (Pacific UTC-8)
+# This is a sentinel value - any calculations using this should trigger warnings
+DEFAULT_DATETIME_BLANK = "1999-01-01T00:00:00-08:00"
+
+
+def _is_default_datetime(time_str: str) -> bool:
+    """
+    Check if a datetime string is the default sentinel value.
+    
+    Args:
+        time_str: Datetime string to check
+    
+    Returns:
+        True if this is the default sentinel value
+    """
+    if time_str is None:
+        return False
+    time_str = str(time_str).strip()
+    # Check for exact match or if it contains the default date (1999-01-01)
+    return time_str == DEFAULT_DATETIME_BLANK or "1999-01-01" in time_str
+
+
 # Park code to timezone mapping
 PARK_TIMEZONE_MAP = {
     # WDW parks (Eastern)
@@ -665,13 +687,43 @@ def add_park_hours(
         else:
             df["_park_hours"] = None
         
+        # Check for missing park hours - this should never happen!
+        missing_hours = df["_park_hours"].isna() | (df["_park_hours"] == None)
+        if missing_hours.any():
+            missing_count = missing_hours.sum()
+            missing_samples = df[missing_hours][["park_date", "park_code"]].drop_duplicates().head(5)
+            error_msg = (
+                f"Missing park hours for {missing_count} rows! "
+                f"This indicates a data quality issue.\n"
+                f"Sample missing (park_date, park_code):\n{missing_samples.to_string()}"
+            )
+            if logger:
+                logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         # Extract times from dict (vectorized)
+        # At this point, all _park_hours should be dicts with opening_time and closing_time
         df["_opening_time_str"] = df["_park_hours"].apply(
             lambda h: h.get("opening_time") if isinstance(h, dict) else None
         )
         df["_closing_time_str"] = df["_park_hours"].apply(
             lambda h: h.get("closing_time") if isinstance(h, dict) else None
         )
+        
+        # Verify opening/closing times are present
+        missing_opening = df["_opening_time_str"].isna() | (df["_opening_time_str"] == "")
+        missing_closing = df["_closing_time_str"].isna() | (df["_closing_time_str"] == "")
+        if missing_opening.any() or missing_closing.any():
+            missing_opening_count = missing_opening.sum()
+            missing_closing_count = missing_closing.sum()
+            error_msg = (
+                f"Missing opening_time for {missing_opening_count} rows, "
+                f"missing closing_time for {missing_closing_count} rows! "
+                f"This indicates a data quality issue in park hours."
+            )
+            if logger:
+                logger.error(error_msg)
+            raise ValueError(error_msg)
         df["pred_emh_morning"] = df["_park_hours"].apply(
             lambda h: h.get("emh_morning", False) if isinstance(h, dict) else False
         )
@@ -680,51 +732,131 @@ def add_park_hours(
         )
         
         # Parse times - vectorized approach for HH:MM format (most common)
+        # Convert park_date to datetime64[ns] first (should already be, but ensure)
         park_dates_dt = pd.to_datetime(df["park_date"], errors="coerce")
         tz = ZoneInfo(park_tz_str)
         
-        # Vectorized parsing for HH:MM format
-        def parse_time_vectorized(time_str_series, park_dates):
-            """Parse HH:MM times vectorized."""
-            result = []
-            for time_str, park_date in zip(time_str_series, park_dates):
-                if pd.isna(time_str) or time_str is None or pd.isna(park_date):
-                    result.append(None)
-                    continue
-                
-                time_str = str(time_str).strip()
-                if not time_str:
-                    result.append(None)
-                    continue
-                
-                # Try HH:MM format first (most common)
-                if ":" in time_str and len(time_str.split(":")) == 2:
-                    try:
-                        parts = time_str.split(":")
-                        hour = int(parts[0])
-                        minute = int(parts[1])
-                        if 0 <= hour <= 23 and 0 <= minute <= 59:
-                            dt = pd.Timestamp(
-                                year=park_date.year,
-                                month=park_date.month,
-                                day=park_date.day,
-                                hour=hour,
-                                minute=minute,
-                                tz=tz,
-                            )
-                            result.append(dt)
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-                
-                # Fallback to full parser for ISO8601 or other formats
-                parsed = _parse_park_time(time_str, park_date, park_tz_str)
-                result.append(parsed)
-            
-            return pd.Series(result, index=time_str_series.index)
+        # Verify park_dates are valid (should never be NaT)
+        if park_dates_dt.isna().any():
+            raise ValueError(f"Invalid park_date values found - this should never happen!")
         
-        opening_dt = parse_time_vectorized(df["_opening_time_str"], park_dates_dt)
-        closing_dt = parse_time_vectorized(df["_closing_time_str"], park_dates_dt)
+        # Convert to date objects for easier handling
+        park_dates_list = [pd.Timestamp(d).date() if not pd.isna(d) else None for d in park_dates_dt]
+        
+        # Vectorized parsing for HH:MM format
+        # Since park hours should never be missing, we can create timezone-aware timestamps directly
+        timestamps_opening = []
+        timestamps_closing = []
+        
+        for time_str_open, time_str_close, park_date in zip(
+            df["_opening_time_str"], df["_closing_time_str"], park_dates_list
+        ):
+            if park_date is None:
+                raise ValueError(f"Invalid park_date - this should never happen!")
+            
+            # Parse opening time
+            time_str_open = str(time_str_open).strip()
+            is_default_open = _is_default_datetime(time_str_open)
+            if is_default_open and logger:
+                logger.warning(
+                    f"Using default datetime value for opening_time: {time_str_open} "
+                    f"(park_date={park_date}). This indicates missing park hours data - "
+                    f"calculations may be inaccurate."
+                )
+            if ":" in time_str_open and len(time_str_open.split(":")) == 2:
+                parts = time_str_open.split(":")
+                hour = int(parts[0])
+                minute = int(parts[1])
+                dt_open = pd.Timestamp(
+                    year=park_date.year,
+                    month=park_date.month,
+                    day=park_date.day,
+                    hour=hour,
+                    minute=minute,
+                    tz=tz,
+                )
+                timestamps_opening.append(dt_open)
+            else:
+                parsed = _parse_park_time(time_str_open, park_date, park_tz_str)
+                if parsed is None:
+                    raise ValueError(f"Failed to parse opening time '{time_str_open}' for date {park_date}")
+                timestamps_opening.append(parsed)
+            
+            # Parse closing time
+            time_str_close = str(time_str_close).strip()
+            is_default_close = _is_default_datetime(time_str_close)
+            if is_default_close and logger:
+                logger.warning(
+                    f"Using default datetime value for closing_time: {time_str_close} "
+                    f"(park_date={park_date}). This indicates missing park hours data - "
+                    f"calculations may be inaccurate."
+                )
+            if ":" in time_str_close and len(time_str_close.split(":")) == 2:
+                parts = time_str_close.split(":")
+                hour = int(parts[0])
+                minute = int(parts[1])
+                dt_close = pd.Timestamp(
+                    year=park_date.year,
+                    month=park_date.month,
+                    day=park_date.day,
+                    hour=hour,
+                    minute=minute,
+                    tz=tz,
+                )
+                timestamps_closing.append(dt_close)
+            else:
+                parsed = _parse_park_time(time_str_close, park_date, park_tz_str)
+                if parsed is None:
+                    raise ValueError(f"Failed to parse closing time '{time_str_close}' for date {park_date}")
+                timestamps_closing.append(parsed)
+        
+        # Create Series directly from timestamps
+        # Convert to DatetimeIndex first to ensure proper dtype, then to Series
+        opening_dt = pd.DatetimeIndex(timestamps_opening, tz=tz)
+        closing_dt = pd.DatetimeIndex(timestamps_closing, tz=tz)
+        
+        # Convert to Series with proper index alignment
+        opening_dt = pd.Series(opening_dt, index=df.index)
+        closing_dt = pd.Series(closing_dt, index=df.index)
+        
+        # Verify dtype is datetime64 (should be after DatetimeIndex conversion)
+        if not pd.api.types.is_datetime64_any_dtype(opening_dt):
+            raise TypeError(f"opening_dt dtype is {opening_dt.dtype}, expected datetime64 after DatetimeIndex conversion")
+        if not pd.api.types.is_datetime64_any_dtype(closing_dt):
+            raise TypeError(f"closing_dt dtype is {closing_dt.dtype}, expected datetime64 after DatetimeIndex conversion")
+        
+        # Check for default values in opening/closing times and warn
+        # Check both string values and parsed datetime values (default is 1999-01-01)
+        opening_time_strs = df["_opening_time_str"].astype(str)
+        closing_time_strs = df["_closing_time_str"].astype(str)
+        has_default_open_str = opening_time_strs.apply(_is_default_datetime)
+        has_default_close_str = closing_time_strs.apply(_is_default_datetime)
+        
+        # Also check parsed datetime values - if year is 1999, it's the default
+        has_default_open_dt = (opening_dt.dt.year == 1999) & (opening_dt.dt.month == 1) & (opening_dt.dt.day == 1)
+        has_default_close_dt = (closing_dt.dt.year == 1999) & (closing_dt.dt.month == 1) & (closing_dt.dt.day == 1)
+        
+        has_default_open = has_default_open_str | has_default_open_dt
+        has_default_close = has_default_close_str | has_default_close_dt
+        
+        if has_default_open.any() or has_default_close.any():
+            n_default_open = has_default_open.sum()
+            n_default_close = has_default_close.sum()
+            if logger:
+                logger.warning(
+                    f"WARNING: Using default datetime values ({DEFAULT_DATETIME_BLANK}) in park hours calculations! "
+                    f"Opening time default: {n_default_open} row(s), "
+                    f"Closing time default: {n_default_close} row(s). "
+                    f"These calculations (pred_mins_since_park_open, pred_park_open_hour, pred_park_close_hour, "
+                    f"pred_park_hours_open) may be inaccurate due to missing park hours data."
+                )
+                # Log sample rows with defaults
+                if has_default_open.any():
+                    sample_rows = df[has_default_open][["park_date", "park_code", "_opening_time_str"]].head(3)
+                    logger.warning(f"Sample rows with default opening_time:\n{sample_rows.to_string()}")
+                if has_default_close.any():
+                    sample_rows = df[has_default_close][["park_date", "park_code", "_closing_time_str"]].head(3)
+                    logger.warning(f"Sample rows with default closing_time:\n{sample_rows.to_string()}")
         
         # Calculate features
         observed_dt = pd.to_datetime(df["observed_at"], errors="coerce", utc=True)
@@ -732,10 +864,50 @@ def add_park_hours(
             observed_dt = observed_dt.dt.tz_localize("UTC")
         observed_dt = observed_dt.dt.tz_convert(park_tz_str)
         
-        mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
+        # Ensure timezones match for subtraction
+        if opening_dt.dt.tz is None and not opening_dt.isna().all():
+            opening_dt = opening_dt.dt.tz_localize(park_tz_str)
+        elif opening_dt.dt.tz is not None:
+            opening_dt = opening_dt.dt.tz_convert(park_tz_str)
+        
+        if closing_dt.dt.tz is None and not closing_dt.isna().all():
+            closing_dt = closing_dt.dt.tz_localize(park_tz_str)
+        elif closing_dt.dt.tz is not None:
+            closing_dt = closing_dt.dt.tz_convert(park_tz_str)
+        
+        # Calculate mins_since_open - handle object dtype by converting subtraction result
+        try:
+            diff = observed_dt - opening_dt
+            # If diff is TimedeltaIndex/Series, use .dt accessor
+            if pd.api.types.is_timedelta64_dtype(diff) or hasattr(diff, 'dt'):
+                mins_since_open = diff.dt.total_seconds() / 60.0
+            else:
+                # Fallback: convert to numeric manually
+                mins_since_open = pd.Series([
+                    (obs - open).total_seconds() / 60.0 if pd.notna(obs) and pd.notna(open) else None
+                    for obs, open in zip(observed_dt, opening_dt)
+                ], index=df.index)
+        except (AttributeError, TypeError) as e:
+            # If .dt accessor fails, manually calculate
+            mins_since_open = pd.Series([
+                (obs - open).total_seconds() / 60.0 if pd.notna(obs) and pd.notna(open) else None
+                for obs, open in zip(observed_dt, opening_dt)
+            ], index=df.index)
+        
         df["pred_mins_since_park_open"] = mins_since_open.astype("Float64")
-        df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
-        df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
+        
+        # Extract hours - handle object dtype
+        try:
+            df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
+            df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
+        except AttributeError:
+            # Fallback: extract hour manually
+            df["pred_park_open_hour"] = pd.Series([
+                dt.hour if pd.notna(dt) else None for dt in opening_dt
+            ], index=df.index).astype("Int64")
+            df["pred_park_close_hour"] = pd.Series([
+                dt.hour if pd.notna(dt) else None for dt in closing_dt
+            ], index=df.index).astype("Int64")
         
         # Calculate hours_open (handle overnight)
         hours_open = (closing_dt - opening_dt).dt.total_seconds() / 3600.0
@@ -853,19 +1025,42 @@ def add_park_hours(
         observed_dt = observed_dt.dt.tz_localize("UTC")
     observed_dt = observed_dt.dt.tz_convert(park_tz_str)
     
-    mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
-    df["pred_mins_since_park_open"] = mins_since_open.astype("Float64")  # Nullable float
+    # Handle object dtype in opening_dt/closing_dt by manually calculating
+    # Check if opening_dt is datetime-like
+    if not pd.api.types.is_datetime64_any_dtype(opening_dt):
+        # Convert manually
+        mins_since_open = pd.Series([
+            (obs - open).total_seconds() / 60.0 if pd.notna(obs) and pd.notna(open) else None
+            for obs, open in zip(observed_dt, opening_dt)
+        ], index=df.index)
+        df["pred_park_open_hour"] = pd.Series([
+            dt.hour if pd.notna(dt) else None for dt in opening_dt
+        ], index=df.index).astype("Int64")
+        df["pred_park_close_hour"] = pd.Series([
+            dt.hour if pd.notna(dt) else None for dt in closing_dt
+        ], index=df.index).astype("Int64")
+        # Calculate hours_open manually
+        hours_open = pd.Series([
+            (close - open).total_seconds() / 3600.0 if pd.notna(close) and pd.notna(open) else None
+            for open, close in zip(opening_dt, closing_dt)
+        ], index=df.index)
+        # Handle overnight
+        for idx in df.index:
+            if pd.notna(opening_dt[idx]) and pd.notna(closing_dt[idx]):
+                if closing_dt[idx] < opening_dt[idx]:
+                    hours_open[idx] = hours_open[idx] + 24.0 if pd.notna(hours_open[idx]) else None
+    else:
+        # Normal path - opening_dt/closing_dt are proper datetime Series
+        mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
+        df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
+        df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
+        hours_open = (closing_dt - opening_dt).dt.total_seconds() / 3600.0
+        # If closing is before opening (overnight), add 24 hours
+        mask_overnight = closing_dt < opening_dt
+        if mask_overnight.any():
+            hours_open.loc[mask_overnight] = hours_open.loc[mask_overnight] + 24.0
     
-    # Extract hours
-    df["pred_park_open_hour"] = opening_dt.dt.hour.astype("Int64")
-    df["pred_park_close_hour"] = closing_dt.dt.hour.astype("Int64")
-    
-    # Calculate hours_open (handle overnight)
-    hours_open = (closing_dt - opening_dt).dt.total_seconds() / 3600.0
-    # If closing is before opening (overnight), add 24 hours
-    mask_overnight = closing_dt < opening_dt
-    if mask_overnight.any():
-        hours_open.loc[mask_overnight] = hours_open.loc[mask_overnight] + 24.0
+    df["pred_mins_since_park_open"] = mins_since_open.astype("Float64")
     df["pred_park_hours_open"] = hours_open.astype("Float64")
     
     # EMH flags

@@ -5,7 +5,8 @@ Clean dimparkhours.csv
 Applies cleaning rules to dimension_tables/dimparkhours.csv:
 - Rename columns: park -> park_code, date -> park_date
 - Ensure dates are YYYY-MM-DD format
-- Times are already ISO8601 with timezone (keep as-is)
+- Fill blank datetime columns with a default (1999-01-01T00:00:00-08:00) for data quality
+- Times are ISO8601 with timezone (keep as-is after filling blanks)
 - Convert emh_morning, emh_evening to boolean
 - Drop or keep predicted_* columns (all null currently)
 
@@ -28,6 +29,9 @@ import pandas as pd
 from utils import get_output_base
 
 DIMPARKHOURS_NAME = "dimparkhours.csv"
+
+# Default for blank datetime columns (Pacific UTC-8). Used so downstream never sees NaT/None.
+DEFAULT_DATETIME_BLANK = "1999-01-01T00:00:00-08:00"
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:
@@ -86,10 +90,75 @@ def clean_dimparkhours(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame
             logger.warning(f"park_date has {null_count} nulls after parsing")
         logger.info(f"Cleaned park_date: YYYY-MM-DD format")
 
-    # ----- Times: already ISO8601 with timezone, keep as-is -----
-    time_cols = ["opening_time", "opening_time_with_emh", "closing_time", "closing_time_with_emh_or_party"]
-    for col in time_cols:
+    # ----- Datetime columns: handle blanks appropriately -----
+    # Core times (opening_time, closing_time) should NEVER be null - use default
+    core_time_cols = ["opening_time", "closing_time"]
+    for col in core_time_cols:
         if col in df.columns:
+            # Fill blank (NaN, None, or empty/whitespace string) with default
+            blank = df[col].isna() | (df[col].fillna("").astype(str).str.strip() == "")
+            n_blank = blank.sum()
+            if n_blank > 0:
+                df.loc[blank, col] = DEFAULT_DATETIME_BLANK
+                logger.info(f"{col}: filled {n_blank} blank value(s) with default {DEFAULT_DATETIME_BLANK}")
+            # Validate ISO8601 format
+            try:
+                pd.to_datetime(df[col], errors="raise")
+                logger.info(f"{col}: ISO8601 format validated")
+            except Exception as e:
+                logger.warning(f"{col}: Some values may not be valid ISO8601: {e}")
+    
+    # EMH-specific times: if missing and no EMH, use regular opening/closing time
+    # If missing and EMH exists, use default (data quality issue)
+    emh_time_cols = ["opening_time_with_emh", "closing_time_with_emh_or_party"]
+    for col in emh_time_cols:
+        if col in df.columns:
+            blank = df[col].isna() | (df[col].fillna("").astype(str).str.strip() == "")
+            n_blank = blank.sum()
+            if n_blank > 0:
+                # Determine if EMH exists for these rows
+                if col == "opening_time_with_emh":
+                    # Check emh_morning flag
+                    has_emh_col = "emh_morning"
+                    fallback_col = "opening_time"
+                else:  # closing_time_with_emh_or_party
+                    # Check emh_evening flag (or both - EMH party could be either)
+                    has_emh_col = "emh_evening"  # Could also check emh_morning for parties
+                    fallback_col = "closing_time"
+                
+                # For rows with blank EMH time:
+                # - If no EMH: use regular opening/closing time (semantically correct)
+                # - If EMH exists: use default (data quality issue - should have EMH time)
+                if has_emh_col in df.columns and fallback_col in df.columns:
+                    # Rows with EMH but missing EMH time → use default
+                    has_emh = df[has_emh_col].fillna(False).astype(bool)
+                    emh_missing_time = blank & has_emh
+                    n_emh_missing = emh_missing_time.sum()
+                    if n_emh_missing > 0:
+                        df.loc[emh_missing_time, col] = DEFAULT_DATETIME_BLANK
+                        logger.warning(
+                            f"{col}: {n_emh_missing} row(s) have EMH but missing EMH time - "
+                            f"filled with default {DEFAULT_DATETIME_BLANK} (data quality issue)"
+                        )
+                    
+                    # Rows without EMH but missing EMH time → use regular opening/closing time
+                    no_emh = ~has_emh
+                    no_emh_missing_time = blank & no_emh
+                    n_no_emh = no_emh_missing_time.sum()
+                    if n_no_emh > 0:
+                        df.loc[no_emh_missing_time, col] = df.loc[no_emh_missing_time, fallback_col]
+                        logger.info(
+                            f"{col}: {n_no_emh} row(s) without EMH - "
+                            f"filled with regular {fallback_col} (semantically correct)"
+                        )
+                else:
+                    # Fallback: if we can't determine EMH status, use default
+                    df.loc[blank, col] = DEFAULT_DATETIME_BLANK
+                    logger.warning(
+                        f"{col}: filled {n_blank} blank value(s) with default "
+                        f"(could not determine EMH status - missing {has_emh_col} or {fallback_col})"
+                    )
+            
             # Validate ISO8601 format
             try:
                 pd.to_datetime(df[col], errors="raise")
