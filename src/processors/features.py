@@ -161,24 +161,29 @@ def add_mins_since_6am(df: pd.DataFrame, observed_at_col: str = "observed_at") -
     """
     df = df.copy()
     
-    # Parse observed_at - pandas will preserve timezone from ISO 8601 string
-    # If it has offset (e.g., -05:00), it becomes timezone-aware
-    # If it has Z, we parse as UTC
-    dt = pd.to_datetime(df[observed_at_col], errors="coerce")
+    # Parse observed_at - convert to UTC to handle mixed timezones
+    # This avoids the pandas warning and ensures consistent datetime dtype
+    dt_utc = pd.to_datetime(df[observed_at_col], errors="coerce", utc=True)
     
-    # If not timezone-aware, try to infer (shouldn't happen with our data)
-    if dt.dt.tz is None:
-        # Try parsing as UTC first
-        dt = pd.to_datetime(df[observed_at_col], errors="coerce", utc=True)
+    # Check if parsing succeeded
+    if dt_utc.isna().all():
+        raise ValueError(f"Failed to parse {observed_at_col} as datetime. Sample values: {df[observed_at_col].head(3).tolist()}")
     
-    # Convert to timezone-aware if still not (fallback - shouldn't happen)
-    if dt.dt.tz is None:
-        # Default to Eastern (most parks)
-        dt = dt.dt.tz_localize("America/New_York", ambiguous="infer", nonexistent="shift_forward")
+    # Get park code from entity_code (first 2 characters) to determine timezone
+    # All rows for an entity should be from the same park
+    if "entity_code" in df.columns and len(df) > 0:
+        park_code = df["entity_code"].iloc[0][:2].lower()
+        park_tz = PARK_TIMEZONE_MAP.get(park_code, "America/New_York")
+    else:
+        # Fallback to Eastern if we can't determine park
+        park_tz = "America/New_York"
     
-    # Extract local time components (timezone is already in the datetime)
-    hours = dt.dt.hour
-    minutes = dt.dt.minute
+    # Convert UTC to park's local timezone to get local time components
+    dt_local = dt_utc.dt.tz_convert(park_tz)
+    
+    # Extract local time components
+    hours = dt_local.dt.hour
+    minutes = dt_local.dt.minute
     
     # Calculate minutes since 6am
     mins_since_6am = (hours - 6) * 60 + minutes

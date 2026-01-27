@@ -16,11 +16,15 @@ import logging
 import sys
 from pathlib import Path
 
+# Add src to path
+if str(Path(__file__).parent.parent / "src") not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from processors.encoding import encode_features
 from processors.entity_index import load_entity_data, mark_entity_modeled
 from processors.features import add_features
 from processors.training import train_entity_model
-from utils import get_output_base
+from utils.paths import get_output_base
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:
