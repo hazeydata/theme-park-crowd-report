@@ -80,23 +80,25 @@ from utils import get_output_base
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+# XGBoost params should match the Julia legacy (attraction-io, XGBoost.jl run_trainer).
+# See docs/XGBOOST_PARAMS.md for current values and how to align with Julia.
 
-# Default XGBoost hyperparameters
+# Default XGBoost hyperparameters (match Julia legacy run_trainer.jl)
 DEFAULT_XGB_PARAMS = {
-    "objective": "reg:squarederror",
+    "objective": "reg:absoluteerror",  # Julia: reg:absoluteerror (MAE)
     "tree_method": "hist",
     "max_depth": 6,
-    "learning_rate": 0.1,
-    "n_estimators": 100,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
-    "min_child_weight": 3,
+    "learning_rate": 0.1,  # eta in Julia
+    "n_estimators": 2000,  # Julia: num_round = 2000; need 2000 trees for accurate prediction
+    "subsample": 0.5,      # Julia: 0.5
+    "colsample_bytree": 1.0,  # Julia omits → XGBoost default 1.0
+    "min_child_weight": 10,   # Julia: 10
     "random_state": 42,
     "verbosity": 0,
 }
 
-# Early stopping rounds
-EARLY_STOPPING_ROUNDS = 10
+# Early stopping: Julia uses watchlist=() so no early stop; we run all n_estimators rounds.
+EARLY_STOPPING_ROUNDS = None
 
 
 # =============================================================================
@@ -303,7 +305,7 @@ def train_xgb_model(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     params: Optional[Dict] = None,
-    early_stopping_rounds: int = EARLY_STOPPING_ROUNDS,
+    early_stopping_rounds: Optional[int] = EARLY_STOPPING_ROUNDS,
     logger: Optional[logging.Logger] = None,
 ) -> xgb.XGBRegressor:
     """
@@ -331,18 +333,22 @@ def train_xgb_model(
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
     
-    # Train model
-    model = xgb.train(
-        params,
-        dtrain,
-        num_boost_round=params.get("n_estimators", 100),
-        evals=[(dtrain, "train"), (dval, "val")],
-        early_stopping_rounds=early_stopping_rounds,
-        verbose_eval=False,
-    )
-    
+    # Train model (Julia legacy: no early stopping, full num_round)
+    num_round = params.get("n_estimators", 2000)
+    train_kwargs = {
+        "params": params,
+        "dtrain": dtrain,
+        "num_boost_round": num_round,
+        "evals": [(dtrain, "train"), (dval, "val")],
+        "verbose_eval": False,
+    }
+    if early_stopping_rounds is not None:
+        train_kwargs["early_stopping_rounds"] = early_stopping_rounds
+    model = xgb.train(**train_kwargs)
+
     if logger:
-        logger.info(f"Trained XGBoost model: {model.best_iteration} rounds (best iteration)")
+        n_used = getattr(model, "best_iteration", None) or num_round
+        logger.info(f"Trained XGBoost model: {n_used} rounds")
     
     # Convert to sklearn API for easier use
     sklearn_model = xgb.XGBRegressor(**params)
