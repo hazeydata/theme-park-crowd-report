@@ -191,8 +191,8 @@ def main() -> None:
     ap.add_argument(
         "--python",
         type=str,
-        default=r"C:\Users\fred\AppData\Local\Programs\Python\Python311\python.exe",
-        help="Python executable to use (default: Python 3.11 - required for XGBoost compatibility)",
+        default="python3",
+        help="Python executable to use (default: python3)",
     )
     args = ap.parse_args()
 

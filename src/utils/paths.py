@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Fallback when config/config.json is missing or has no output_base
 _DEFAULT_OUTPUT_BASE = Path(
-    r"D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report"
+    "/home/fred/TouringPlans.com Dropbox/fred hazelton/stats team/pipeline/hazeydata/theme-park-crowd-report"
 )
 
 
