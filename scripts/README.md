@@ -329,3 +329,81 @@ python scripts/cleanup_logs.py --days 14 --pattern "train_entity_model_*.log"
 ## Note
 
 Scripts here should be standalone and not depend on the main pipeline structure. They can import from `src/` if needed, but should be runnable independently.
+
+---
+
+## Linux Scripts
+
+Bash equivalents of the PowerShell scripts for running on Linux.
+
+### `common.sh`
+
+Shared functions sourced by other bash scripts:
+- `get_project_root` — Find project root directory
+- `get_output_base` — Read output_base from config/config.json
+- `get_python` — Find python3 or python executable
+- `log_info` / `log_error` — Timestamped logging
+
+### `run_etl.sh`
+
+Main ETL script wrapper. Equivalent to running `python src/get_tp_wait_time_data_from_s3.py`.
+
+```bash
+# Standard run
+./scripts/run_etl.sh
+
+# Custom output path
+./scripts/run_etl.sh --output-base /path/to/output
+
+# Full rebuild
+./scripts/run_etl.sh --full-rebuild
+```
+
+### `run_dimension_fetches.sh`
+
+Fetches all dimension tables from S3 and builds local dimensions.
+
+```bash
+./scripts/run_dimension_fetches.sh
+./scripts/run_dimension_fetches.sh --output-base /path/to/output
+```
+
+### `run_queue_times_loop.sh`
+
+Continuous Queue-Times.com fetcher. Runs until Ctrl+C.
+
+```bash
+# Default 5-minute interval
+./scripts/run_queue_times_loop.sh
+
+# Custom interval
+./scripts/run_queue_times_loop.sh --interval 600
+```
+
+### `install_cron.sh`
+
+Install/remove cron jobs equivalent to Windows scheduled tasks.
+
+```bash
+# Preview
+./scripts/install_cron.sh --show
+
+# Install
+./scripts/install_cron.sh
+
+# Remove
+./scripts/install_cron.sh --remove
+```
+
+### `queue-times-loop.service`
+
+Systemd service file for running the queue-times fetcher as a system service.
+
+```bash
+sudo cp scripts/queue-times-loop.service /etc/systemd/system/
+# Edit paths, then:
+sudo systemctl daemon-reload
+sudo systemctl enable --now queue-times-loop
+```
+
+See [docs/LINUX_SETUP.md](../docs/LINUX_SETUP.md) for complete Linux setup guide.

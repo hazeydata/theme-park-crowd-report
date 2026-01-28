@@ -1,0 +1,45 @@
+# queue-times-loop.service - Systemd service for continuous Queue-Times fetcher
+#
+# This runs the queue-times loop as a system service that starts on boot.
+# Alternative to running in a terminal or via cron @reboot.
+#
+# Installation:
+#   1. Copy this file to /etc/systemd/system/queue-times-loop.service
+#   2. Edit the paths below to match your setup
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable queue-times-loop
+#   5. sudo systemctl start queue-times-loop
+#
+# Management:
+#   sudo systemctl status queue-times-loop
+#   sudo systemctl stop queue-times-loop
+#   sudo journalctl -u queue-times-loop -f
+
+[Unit]
+Description=Theme Park Queue-Times.com Wait Time Fetcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wilma
+Group=wilma
+
+# EDIT THESE PATHS:
+WorkingDirectory=/home/wilma/tp-crowd-report
+ExecStart=/home/wilma/tp-crowd-report/scripts/run_queue_times_loop.sh --interval 300
+
+# Restart on failure, but not too aggressively
+Restart=on-failure
+RestartSec=60
+
+# Environment (optional - uncomment and edit if needed)
+# Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+# Environment="AWS_PROFILE=default"
+
+# Logging goes to journald by default
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
