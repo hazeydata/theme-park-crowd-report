@@ -37,6 +37,9 @@ except:
 
 # Find python executable
 get_python() {
+    # Add user's local bin to PATH for pip-installed packages
+    export PATH="$HOME/.local/bin:$PATH"
+    
     if command -v python3 &> /dev/null; then
         echo "python3"
     elif command -v python &> /dev/null; then

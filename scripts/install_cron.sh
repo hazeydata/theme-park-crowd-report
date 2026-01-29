@@ -1,15 +1,16 @@
 #!/bin/bash
 # install_cron.sh - Install cron jobs for the Theme Park pipeline
 #
-# Sets up scheduled tasks equivalent to the Windows Task Scheduler:
-#   - 5:00 AM ET: Main ETL
+# Sets up scheduled tasks equivalent to the Windows Task Scheduler (daily tasks only):
+#   - 5:00 AM ET: Main ETL (incremental)
 #   - 5:30 AM ET: Wait time DB report
-#   - 6:00 AM ET: Dimension fetches
-#   - 7:00 AM ET: Secondary ETL (backup)
-#   - Sunday 6:30 AM ET: Posted accuracy report
-#   - Sunday 7:00 AM ET: Log cleanup
+#   - 6:00 AM ET: Dimension fetches (entity, park hours, events, metatable + build dimdategroupid, dimseason)
+#   - 7:00 AM ET: Secondary ETL (backup run)
+#
+# Weekly tasks (Sunday) are skipped - will be set up on Mac mini next week.
 #
 # Note: Times are in system timezone. Set TZ=America/New_York if needed.
+# For queue-times loop (continuous 5-min fetches), use systemd service or run manually.
 #
 # Usage:
 #   ./scripts/install_cron.sh              # Install cron jobs
@@ -31,30 +32,29 @@ CRON_MARKER="# theme-park-crowd-report"
 
 # Build cron entries
 # Format: minute hour day month weekday command
+# Note: Times are in system timezone. If system is not Eastern, set TZ=America/New_York or adjust times.
 generate_cron_entries() {
     cat << EOF
 # Theme Park Crowd Report Pipeline - Scheduled Tasks
 # Installed by install_cron.sh - DO NOT EDIT MANUALLY
-# Times are Eastern (adjust TZ or use TZ=America/New_York prefix if needed)
+# Times are Eastern (system timezone should be America/New_York, or adjust times below)
 $CRON_MARKER
 
-# 5:00 AM - Main ETL (incremental)
-0 5 * * * cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_5am.log 2>&1 $CRON_MARKER
+# 5:00 AM Eastern - Main ETL (incremental)
+0 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_5am.log 2>&1 $CRON_MARKER
 
-# 5:30 AM - Wait time DB report
-30 5 * * * cd $PROJECT_ROOT && $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 >> $LOGS_DIR/cron_report_530am.log 2>&1 $CRON_MARKER
+# 5:30 AM Eastern - Wait time DB report
+30 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 >> $LOGS_DIR/cron_report_530am.log 2>&1 $CRON_MARKER
 
-# 6:00 AM - Dimension fetches
-0 6 * * * cd $PROJECT_ROOT && $SCRIPT_DIR/run_dimension_fetches.sh >> $LOGS_DIR/cron_dimensions_6am.log 2>&1 $CRON_MARKER
+# 6:00 AM Eastern - Dimension fetches (entity, park hours, events, metatable + build dimdategroupid, dimseason)
+0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_dimension_fetches.sh >> $LOGS_DIR/cron_dimensions_6am.log 2>&1 $CRON_MARKER
 
-# 7:00 AM - Secondary ETL (backup run)
-0 7 * * * cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_7am.log 2>&1 $CRON_MARKER
+# 7:00 AM Eastern - Secondary ETL (backup run)
+0 7 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_7am.log 2>&1 $CRON_MARKER
 
-# Sunday 6:30 AM - Posted accuracy report
-30 6 * * 0 cd $PROJECT_ROOT && $PYTHON scripts/report_posted_accuracy.py >> $LOGS_DIR/cron_posted_accuracy.log 2>&1 $CRON_MARKER
-
-# Sunday 7:00 AM - Log cleanup (30 days, keep 10 recent)
-0 7 * * 0 cd $PROJECT_ROOT && $PYTHON scripts/cleanup_logs.py --days 30 --keep-recent 10 >> $LOGS_DIR/cron_cleanup.log 2>&1 $CRON_MARKER
+# Weekly tasks (Sunday) skipped - will be set up on Mac mini next week:
+#   - Sunday 6:30 AM: Posted accuracy report
+#   - Sunday 7:00 AM: Log cleanup
 
 EOF
 }

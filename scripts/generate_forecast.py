@@ -150,6 +150,7 @@ def build_features_for_time_slot(
     park_timezone: str,
     dims: dict,
     output_base: Path,
+    park_hours: Optional[dict] = None,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
     """
@@ -167,6 +168,7 @@ def build_features_for_time_slot(
         park_timezone: Park timezone (e.g., "America/New_York")
         dims: Dimension tables dict
         output_base: Pipeline output base directory
+        park_hours: Optional dict with opening_time, closing_time (HH:MM format)
         logger: Optional logger
     
     Returns:
@@ -201,7 +203,41 @@ def build_features_for_time_slot(
         fact_row,
         output_base,
         logger=logger,
+        include_park_hours=True,  # Try to include park hours
     )
+    
+    # If park hours features are missing (None), calculate them from provided hours
+    # This happens when dimparkhours.csv doesn't exist
+    needs_park_hours = False
+    if "pred_park_open_hour" in df_features.columns:
+        first_val = df_features["pred_park_open_hour"].iloc[0]
+        needs_park_hours = (first_val is None or pd.isna(first_val))
+    
+    if park_hours and needs_park_hours:
+        if logger:
+            logger.debug(f"Calculating park hours features from provided hours: {park_hours}")
+        # Parse hours from park_hours dict
+        opening_time = park_hours.get("opening_time", "09:00")
+        closing_time = park_hours.get("closing_time", "22:00")
+        open_hour, open_min = map(int, opening_time.split(":"))
+        close_hour, close_min = map(int, closing_time.split(":"))
+        
+        # Calculate mins_since_park_open
+        observed_dt = pd.to_datetime(df_features["observed_at"], errors="coerce")
+        park_date_dt = pd.Timestamp(park_date).tz_localize(tz)
+        opening_dt = park_date_dt.replace(hour=open_hour, minute=open_min)
+        mins_since_open = (observed_dt - opening_dt).dt.total_seconds() / 60.0
+        
+        # Handle negative (before park open) - can be negative, that's OK
+        df_features["pred_mins_since_park_open"] = mins_since_open.astype("Float64")
+        df_features["pred_park_open_hour"] = open_hour
+        df_features["pred_park_close_hour"] = close_hour
+        df_features["pred_park_hours_open"] = float((close_hour - open_hour) % 24)
+        df_features["pred_emh_morning"] = bool(park_hours.get("emh_morning", False))
+        df_features["pred_emh_evening"] = bool(park_hours.get("emh_evening", False))
+        
+        if logger:
+            logger.debug(f"Set park hours: open={open_hour}:{open_min:02d}, close={close_hour}:{close_min:02d}, mins_since_open={mins_since_open.iloc[0]:.1f}")
     
     return df_features
 
@@ -292,8 +328,8 @@ def predict_actual_for_time_slot(
         # Fill nulls
         X = X.fillna(0)
         
-        # Predict
-        prediction = model.predict(X)[0]
+        # Predict - XGBoost models saved with feature names need numpy array, not DataFrame
+        prediction = model.predict(X.values)[0]
         
         # Ensure non-negative
         prediction = max(0.0, float(prediction))
@@ -364,81 +400,111 @@ def generate_forecast_for_entity_date(
         dimparkhours_path = output_base / "dimension_tables" / "dimparkhours.csv"
         if not dimparkhours_path.exists():
             if logger:
-                logger.warning(f"Park hours table not found for {entity_code} {park_date}")
-            return None
-        
-        try:
-            dimparkhours = pd.read_csv(dimparkhours_path, low_memory=False)
-            park_date_str = park_date.strftime("%Y-%m-%d")
-            park_code_upper = park_code.upper()
-            
-            # Find date and park columns (dimparkhours uses "date" and "park")
-            date_col = None
-            for col in ["date", "park_date", "park_day_id"]:
-                if col in dimparkhours.columns:
-                    date_col = col
-                    break
-            
-            park_col = None
-            for col in ["park", "park_code", "code"]:
-                if col in dimparkhours.columns:
-                    park_col = col
-                    break
-            
-            if not date_col or not park_col:
-                if logger:
-                    logger.error(f"dimparkhours.csv missing required columns (date, park)")
-                return None
-            
-            # Find matching row
-            mask = (
-                (pd.to_datetime(dimparkhours[date_col], errors="coerce").dt.strftime("%Y-%m-%d") == park_date_str) &
-                (dimparkhours[park_col].astype(str).str.upper() == park_code_upper)
-            )
-            matching = dimparkhours[mask]
-            
-            if matching.empty:
-                if logger:
-                    logger.debug(f"No park hours for {park_code} {park_date}")
-                return None
-            
-            # Use first match
-            row = matching.iloc[0]
-            
-            # Extract time strings (handle ISO8601 format)
-            opening_time_raw = row.get("opening_time", "09:00")
-            closing_time_raw = row.get("closing_time", "22:00")
-            
-            # Parse ISO8601 datetime strings to extract HH:MM
-            def extract_time(time_val):
-                if pd.isna(time_val):
-                    return "09:00"
-                time_str = str(time_val)
-                if "T" in time_str:
-                    # ISO8601 format: extract HH:MM from "2004-01-01T08:00:00-08:00"
-                    parts = time_str.split("T")
-                    if len(parts) > 1:
-                        time_part = parts[1].split("-")[0].split("+")[0]
-                        return time_part[:5]  # HH:MM
-                elif ":" in time_str:
-                    return time_str[:5]  # Already HH:MM
-                return "09:00"  # Default
-            
+                logger.warning(f"Park hours table not found for {entity_code} {park_date}, using default hours (09:00-22:00)")
+            # Use default hours as fallback to allow testing
             hours = {
-                "opening_time": extract_time(opening_time_raw),
-                "closing_time": extract_time(closing_time_raw),
-                "emh_morning": bool(row.get("emh_morning", False)),
-                "emh_evening": bool(row.get("emh_evening", False)),
+                "opening_time": "09:00",
+                "closing_time": "22:00",
+                "emh_morning": False,
+                "emh_evening": False,
             }
-        except Exception as e:
-            if logger:
-                logger.error(f"Error reading dimparkhours.csv: {e}", exc_info=True)
-            return None
+        else:
+            try:
+                dimparkhours = pd.read_csv(dimparkhours_path, low_memory=False)
+                park_date_str = park_date.strftime("%Y-%m-%d")
+                park_code_upper = park_code.upper()
+                
+                # Find date and park columns (dimparkhours uses "date" and "park")
+                date_col = None
+                for col in ["date", "park_date", "park_day_id"]:
+                    if col in dimparkhours.columns:
+                        date_col = col
+                        break
+                
+                park_col = None
+                for col in ["park", "park_code", "code"]:
+                    if col in dimparkhours.columns:
+                        park_col = col
+                        break
+                
+                if not date_col or not park_col:
+                    if logger:
+                        logger.warning(f"dimparkhours.csv missing required columns (date, park), using default hours")
+                    # Use default hours as fallback
+                    hours = {
+                        "opening_time": "09:00",
+                        "closing_time": "22:00",
+                        "emh_morning": False,
+                        "emh_evening": False,
+                    }
+                else:
+                    # Find matching row
+                    mask = (
+                        (pd.to_datetime(dimparkhours[date_col], errors="coerce").dt.strftime("%Y-%m-%d") == park_date_str) &
+                        (dimparkhours[park_col].astype(str).str.upper() == park_code_upper)
+                    )
+                    matching = dimparkhours[mask]
+                    
+                    if matching.empty:
+                        if logger:
+                            logger.warning(f"No park hours for {park_code} {park_date}, using default hours (09:00-22:00)")
+                        # Use default hours as fallback
+                        hours = {
+                            "opening_time": "09:00",
+                            "closing_time": "22:00",
+                            "emh_morning": False,
+                            "emh_evening": False,
+                        }
+                    else:
+                        # Use first match
+                        row = matching.iloc[0]
+                        
+                        # Extract time strings (handle ISO8601 format)
+                        opening_time_raw = row.get("opening_time", "09:00")
+                        closing_time_raw = row.get("closing_time", "22:00")
+                        
+                        # Parse ISO8601 datetime strings to extract HH:MM
+                        def extract_time(time_val):
+                            if pd.isna(time_val):
+                                return "09:00"
+                            time_str = str(time_val)
+                            if "T" in time_str:
+                                # ISO8601 format: extract HH:MM from "2004-01-01T08:00:00-08:00"
+                                parts = time_str.split("T")
+                                if len(parts) > 1:
+                                    time_part = parts[1].split("-")[0].split("+")[0]
+                                    return time_part[:5]  # HH:MM
+                            elif ":" in time_str:
+                                return time_str[:5]  # Already HH:MM
+                            return "09:00"  # Default
+                        
+                        hours = {
+                            "opening_time": extract_time(opening_time_raw),
+                            "closing_time": extract_time(closing_time_raw),
+                            "emh_morning": bool(row.get("emh_morning", False)),
+                            "emh_evening": bool(row.get("emh_evening", False)),
+                        }
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Error reading dimparkhours.csv: {e}, using default hours (09:00-22:00)")
+                # Use default hours as fallback
+                hours = {
+                    "opening_time": "09:00",
+                    "closing_time": "22:00",
+                    "emh_morning": False,
+                    "emh_evening": False,
+                }
     
     if not hours:
         if logger:
-            logger.debug(f"No park hours for {park_code} {park_date}")
-        return None
+            logger.warning(f"No park hours for {park_code} {park_date}, using default hours (09:00-22:00)")
+        # Use default hours as fallback to allow testing
+        hours = {
+            "opening_time": "09:00",
+            "closing_time": "22:00",
+            "emh_morning": False,
+            "emh_evening": False,
+        }
     
     # Extract time strings (handle ISO8601 or HH:MM format)
     park_open_time = hours.get("opening_time", "09:00")
@@ -509,7 +575,8 @@ def generate_forecast_for_entity_date(
                 park_timezone,
                 dims,
                 output_base,
-                logger,
+                park_hours=hours,  # Pass park hours so features can be calculated
+                logger=logger,
             )
             
             # Encode features

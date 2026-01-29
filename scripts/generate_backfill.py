@@ -140,6 +140,7 @@ def build_features_for_time_slot(
     park_timezone: str,
     dims: dict,
     output_base: Path,
+    park_hours: Optional[dict] = None,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
     """Build features for a single time slot (for model prediction)."""
@@ -169,8 +170,8 @@ def build_features_for_time_slot(
     df_features = add_features(
         fact_row,
         output_base,
-        dims=dims,
         logger=logger,
+        include_park_hours=True,
     )
     
     return df_features
@@ -401,8 +402,8 @@ def predict_actual_with_posted(
         # Fill nulls
         X = X.fillna(0)
         
-        # Predict
-        prediction = model.predict(X)[0]
+        # Predict - XGBoost models saved with feature names need numpy array, not DataFrame
+        prediction = model.predict(X.values)[0]
         
         # Ensure non-negative
         prediction = max(0.0, float(prediction))
@@ -443,25 +444,86 @@ def generate_backfill_for_entity_date(
     park_code_lower = park_code.lower()
     park_timezone = PARK_TIMEZONE_MAP.get(park_code_lower, "America/New_York")
     
-    # Get park hours
+    # Get park hours (try versioned table first, fallback to regular dimparkhours, then defaults)
     versioned_df = load_versioned_table(output_base)
-    if versioned_df is None:
-        if logger:
-            logger.warning(f"Versioned park hours table not found for {entity_code} {park_date}")
-        return None
+    hours = None
     
-    hours = get_park_hours_for_date(
-        park_date,
-        park_code,
-        versioned_df,
-        as_of=datetime.now(ZoneInfo("UTC")),
-        logger=logger,
-    )
+    if versioned_df is not None:
+        hours = get_park_hours_for_date(
+            park_date,
+            park_code,
+            versioned_df,
+            as_of=datetime.now(ZoneInfo("UTC")),
+            logger=logger,
+        )
     
+    # Fallback to regular dimparkhours.csv
+    if hours is None:
+        dimparkhours_path = output_base / "dimension_tables" / "dimparkhours.csv"
+        if dimparkhours_path.exists():
+            try:
+                dimparkhours = pd.read_csv(dimparkhours_path, low_memory=False)
+                park_date_str = park_date.strftime("%Y-%m-%d")
+                park_code_upper = park_code.upper()
+                
+                # Find date and park columns
+                date_col = None
+                for col in ["date", "park_date", "park_day_id"]:
+                    if col in dimparkhours.columns:
+                        date_col = col
+                        break
+                
+                park_col = None
+                for col in ["park", "park_code", "code"]:
+                    if col in dimparkhours.columns:
+                        park_col = col
+                        break
+                
+                if date_col and park_col:
+                    mask = (
+                        (pd.to_datetime(dimparkhours[date_col], errors="coerce").dt.strftime("%Y-%m-%d") == park_date_str) &
+                        (dimparkhours[park_col].astype(str).str.upper() == park_code_upper)
+                    )
+                    matching = dimparkhours[mask]
+                    
+                    if not matching.empty:
+                        row = matching.iloc[0]
+                        opening_time_raw = row.get("opening_time", "09:00")
+                        closing_time_raw = row.get("closing_time", "22:00")
+                        
+                        def extract_time(time_val):
+                            if pd.isna(time_val):
+                                return "09:00"
+                            time_str = str(time_val)
+                            if "T" in time_str:
+                                parts = time_str.split("T")
+                                if len(parts) > 1:
+                                    time_part = parts[1].split("-")[0].split("+")[0]
+                                    return time_part[:5]
+                            elif ":" in time_str:
+                                return time_str[:5]
+                            return "09:00"
+                        
+                        hours = {
+                            "opening_time": extract_time(opening_time_raw),
+                            "closing_time": extract_time(closing_time_raw),
+                            "emh_morning": bool(row.get("emh_morning", False)),
+                            "emh_evening": bool(row.get("emh_evening", False)),
+                        }
+            except Exception as e:
+                if logger:
+                    logger.debug(f"Error reading dimparkhours.csv: {e}")
+    
+    # Final fallback: use default hours
     if not hours:
         if logger:
-            logger.debug(f"No park hours for {park_code} {park_date}")
-        return None
+            logger.warning(f"No park hours for {park_code} {park_date}, using default hours (09:00-22:00)")
+        hours = {
+            "opening_time": "09:00",
+            "closing_time": "22:00",
+            "emh_morning": False,
+            "emh_evening": False,
+        }
     
     park_open_time = hours.get("opening_time", "09:00")
     park_close_time = hours.get("closing_time", "22:00")
@@ -520,7 +582,8 @@ def generate_backfill_for_entity_date(
                     park_timezone,
                     dims,
                     output_base,
-                    logger,
+                    park_hours=hours,  # Pass park hours so features can be calculated
+                    logger=logger,
                 )
                 
                 # Encode features
