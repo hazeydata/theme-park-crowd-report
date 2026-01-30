@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 if str(Path(__file__).parent.parent / "src") not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from processors.entity_index import get_entities_needing_modeling
+from processors.entity_index import get_entities_needing_modeling, get_valid_entity_codes
 from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
 
@@ -115,7 +115,9 @@ def train_single_entity(
         if result.returncode == 0:
             return True, f"SUCCESS ({elapsed_str})"
         else:
-            error_msg = result.stderr[:500] if result.stderr else "Unknown error"
+            error_msg = (result.stderr or "").strip()[:500] or (result.stdout or "").strip()[:500]
+            if not error_msg:
+                error_msg = "Unknown error (check logs/train_entity_model_*.log for this entity)"
             return False, f"FAILED ({elapsed_str}): {error_msg}"
     
     except subprocess.TimeoutExpired:
@@ -248,6 +250,15 @@ def main() -> None:
         )
         
         entities_to_train = [entity_code for entity_code, _, _ in entities_needing]
+        
+        # Filter to only entities that exist in dimentity (exclude invalid codes e.g. queue-times fallback AK10921)
+        valid_codes = get_valid_entity_codes(base)
+        if valid_codes is not None:
+            before = len(entities_to_train)
+            entities_to_train = [e for e in entities_to_train if e in valid_codes]
+            excluded = before - len(entities_to_train)
+            if excluded > 0:
+                logger.info(f"Filtered to dimentity: {len(entities_to_train)} entities ({excluded} invalid codes excluded)")
         
         if not entities_to_train:
             logger.info("No entities found that need training")

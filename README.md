@@ -12,6 +12,8 @@ This pipeline:
 5. **Derives park codes and dates** from the data
 6. **Writes clean CSV files** organized by park and date: `fact_tables/clean/YYYY-MM/{park}_{YYYY-MM-DD}.csv`
 
+**Current pipeline state (Linux, cron, queue-times, paths):** [docs/PIPELINE_STATE.md](docs/PIPELINE_STATE.md) — single “where we are” reference.
+
 **Fact table schema** (columns, `observed_at`, `wait_time_type`, sources): [docs/SCHEMA.md](docs/SCHEMA.md).  
 **Entity metadata index** (efficient modeling workflows, selective entity loading): [docs/ENTITY_INDEX.md](docs/ENTITY_INDEX.md).  
 **Legacy pipeline (attraction-io) alignment** and next steps: [docs/ATTRACTION_IO_ALIGNMENT.md](docs/ATTRACTION_IO_ALIGNMENT.md).  

@@ -6,6 +6,7 @@
 #   - 5:30 AM ET: Wait time DB report
 #   - 6:00 AM ET: Dimension fetches (entity, park hours, events, metatable + build dimdategroupid, dimseason)
 #   - 7:00 AM ET: Secondary ETL (backup run)
+#   - 8:00 AM ET: Batch training (entities needing modeling)
 #
 # Weekly tasks (Sunday) are skipped - will be set up on Mac mini next week.
 #
@@ -30,9 +31,7 @@ LOGS_DIR="$OUTPUT_BASE/logs"
 # Marker for our cron entries
 CRON_MARKER="# theme-park-crowd-report"
 
-# Build cron entries
-# Format: minute hour day month weekday command
-# Note: Times are in system timezone. If system is not Eastern, set TZ=America/New_York or adjust times.
+# Build cron entries (five separate jobs)
 generate_cron_entries() {
     cat << EOF
 # Theme Park Crowd Report Pipeline - Scheduled Tasks
@@ -52,6 +51,9 @@ $CRON_MARKER
 # 7:00 AM Eastern - Secondary ETL (backup run)
 0 7 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_7am.log 2>&1 $CRON_MARKER
 
+# 8:00 AM Eastern - Batch training (entities needing modeling)
+0 8 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/train_batch_entities.py --min-age-hours 24 >> $LOGS_DIR/cron_training_8am.log 2>&1 $CRON_MARKER
+
 # Weekly tasks (Sunday) skipped - will be set up on Mac mini next week:
 #   - Sunday 6:30 AM: Posted accuracy report
 #   - Sunday 7:00 AM: Log cleanup
@@ -59,11 +61,31 @@ $CRON_MARKER
 EOF
 }
 
+# Build cron entries (single daily master script: ETL → dimensions → aggregates → report → training → forecast → WTI)
+generate_daily_master_entries() {
+    cat << EOF
+# Theme Park Crowd Report Pipeline - Daily Master (single run)
+# Installed by install_cron.sh --daily-master - DO NOT EDIT MANUALLY
+# Runs: ETL → Dimensions → Posted Aggregates → Report → Training → Forecast → WTI
+$CRON_MARKER
+
+# 6:00 AM Eastern - Full daily pipeline (run_daily_pipeline.sh; script also tees to this log)
+0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_daily_pipeline.sh >> $LOGS_DIR/daily_pipeline_\$(date +\\%Y-\\%m-\\%d).log 2>&1 $CRON_MARKER
+
+EOF
+}
+
 # Show what would be installed
 show_cron() {
+    local use_master="${1:-}"
     echo "=== Cron entries to be installed ==="
     echo ""
-    generate_cron_entries
+    if [[ "$use_master" == "--daily-master" ]]; then
+        generate_daily_master_entries
+        echo "(Single daily run: run_daily_pipeline.sh at 6:00 AM Eastern)"
+    else
+        generate_cron_entries
+    fi
     echo ""
     echo "Project root: $PROJECT_ROOT"
     echo "Output base: $OUTPUT_BASE"
@@ -79,13 +101,21 @@ remove_cron() {
 
 # Install cron entries
 install_cron() {
+    local use_master="${1:-}"
     echo "Installing theme-park-crowd-report cron entries..."
     
-    # Create logs directory
-    mkdir -p "$LOGS_DIR"
+    # Create logs directory (may fail if output_base not mounted, e.g. Dropbox on another machine)
+    if ! mkdir -p "$LOGS_DIR" 2>/dev/null; then
+        echo "Note: Could not create logs dir ($LOGS_DIR); cron will still be installed."
+    fi
     
     # Remove old entries first, then add new ones
-    (crontab -l 2>/dev/null | grep -v "$CRON_MARKER" || true; generate_cron_entries) | crontab -
+    if [[ "$use_master" == "--daily-master" ]]; then
+        (crontab -l 2>/dev/null | grep -v "$CRON_MARKER" || true; generate_daily_master_entries) | crontab -
+        echo "(Single daily pipeline at 6:00 AM Eastern)"
+    else
+        (crontab -l 2>/dev/null | grep -v "$CRON_MARKER" || true; generate_cron_entries) | crontab -
+    fi
     
     echo ""
     echo "Done! Cron jobs installed."
@@ -102,19 +132,23 @@ install_cron() {
 # Main
 case "${1:-}" in
     --show)
-        show_cron
+        show_cron "$2"
         ;;
     --remove)
         remove_cron
         ;;
     --help|-h)
-        echo "Usage: $0 [--show|--remove|--help]"
+        echo "Usage: $0 [--show [--daily-master]|--remove|--daily-master|--help]"
         echo ""
         echo "Options:"
-        echo "  (none)    Install cron jobs"
-        echo "  --show    Show what would be installed"
-        echo "  --remove  Remove installed cron jobs"
+        echo "  (none)         Install five separate cron jobs (5am ETL, 5:30 report, 6am dimensions, 7am ETL, 8am training)"
+        echo "  --daily-master Install single daily pipeline at 6:00 AM (run_daily_pipeline.sh: ETL → dimensions → aggregates → report → training → forecast → WTI)"
+        echo "  --show         Show what would be installed (add --daily-master for master script)"
+        echo "  --remove      Remove installed cron jobs"
         exit 0
+        ;;
+    --daily-master)
+        install_cron "--daily-master"
         ;;
     "")
         install_cron

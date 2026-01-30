@@ -22,20 +22,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=wilma
-Group=wilma
+User=fred
+Group=fred
 
-# EDIT THESE PATHS:
-WorkingDirectory=/home/wilma/tp-crowd-report
-ExecStart=/home/wilma/tp-crowd-report/scripts/run_queue_times_loop.sh --interval 300
+# Project root (theme-park-crowd-report); output_base from config/config.json
+WorkingDirectory=/home/fred/Desktop/theme-park-crowd-report
+ExecStart=/home/fred/Desktop/theme-park-crowd-report/scripts/run_queue_times_loop.sh --interval 300
 
 # Restart on failure, but not too aggressively
 Restart=on-failure
 RestartSec=60
 
-# Environment (optional - uncomment and edit if needed)
-# Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-# Environment="AWS_PROFILE=default"
+# Ensure pip-installed packages (e.g. requests, pandas) are found
+Environment="PATH=/home/fred/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 # Logging goes to journald by default
 StandardOutput=journal

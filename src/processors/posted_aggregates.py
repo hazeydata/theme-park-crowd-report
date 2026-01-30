@@ -121,7 +121,8 @@ def build_posted_aggregates(
     
     posted_count = 0
     processed_count = 0
-    
+    _logged_first_error = False
+
     for csv_path in csvs:
         try:
             df = pd.read_csv(csv_path, low_memory=False)
@@ -190,7 +191,16 @@ def build_posted_aggregates(
         
         except Exception as e:
             if logger:
-                logger.debug(f"Error reading {csv_path}: {e}")
+                if not _logged_first_error:
+                    _logged_first_error = True
+                    logger.warning(
+                        "First exception during posted aggregates (file=%s): %s",
+                        csv_path,
+                        e,
+                        exc_info=True,
+                    )
+                else:
+                    logger.debug(f"Error reading {csv_path}: {e}")
             continue
     
     if logger:

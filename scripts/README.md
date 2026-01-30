@@ -344,6 +344,18 @@ Shared functions sourced by other bash scripts:
 - `get_python` — Find python3 or python executable
 - `log_info` / `log_error` — Timestamped logging
 
+### `run_daily_pipeline.sh` (Linux)
+
+Master script that runs the full pipeline in order: ETL → Dimension fetches → Posted aggregates → Wait time DB report → Batch training → Forecast → WTI. Use for a single daily run (e.g. from cron at 6:00 AM).
+
+```bash
+./scripts/run_daily_pipeline.sh
+./scripts/run_daily_pipeline.sh --no-stop-on-error   # continue on step failure
+./scripts/run_daily_pipeline.sh --skip-etl --skip-training
+```
+
+Options: `--output-base PATH`, `--no-stop-on-error`, `--skip-etl`, `--skip-dimensions`, `--skip-aggregates`, `--skip-report`, `--skip-training`, `--skip-forecast`, `--skip-wti`. See [LINUX_CRON_SETUP.md](../LINUX_CRON_SETUP.md) and `install_cron.sh --daily-master`.
+
 ### `run_etl.sh`
 
 Main ETL script wrapper. Equivalent to running `python src/get_tp_wait_time_data_from_s3.py`.
@@ -388,8 +400,11 @@ Install/remove cron jobs equivalent to Windows scheduled tasks.
 # Preview
 ./scripts/install_cron.sh --show
 
-# Install
+# Install five separate jobs (5am ETL, 5:30 report, 6am dimensions, 7am ETL, 8am training)
 ./scripts/install_cron.sh
+
+# Install single daily pipeline at 6:00 AM (run_daily_pipeline.sh)
+./scripts/install_cron.sh --daily-master
 
 # Remove
 ./scripts/install_cron.sh --remove

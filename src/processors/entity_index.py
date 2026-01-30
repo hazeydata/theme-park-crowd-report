@@ -359,6 +359,30 @@ def get_entities_needing_modeling(
     return results
 
 
+def get_valid_entity_codes(output_base: Path) -> Optional[set[str]]:
+    """
+    Load the set of valid entity codes from dimentity (dimension_tables/dimentity.csv).
+    Used to filter out invalid entity codes that appear in the index (e.g. queue-times
+    fallback codes like AK10921 that are not in dimentity).
+    
+    Returns:
+        Set of uppercase entity codes, or None if dimentity is missing/unreadable.
+    """
+    dim_path = output_base / "dimension_tables" / "dimentity.csv"
+    if not dim_path.exists():
+        return None
+    try:
+        df = pd.read_csv(dim_path, low_memory=False)
+        # dimentity uses column "code" for entity code
+        code_col = "code" if "code" in df.columns else "entity_code" if "entity_code" in df.columns else None
+        if code_col is None:
+            return None
+        codes = df[code_col].astype(str).str.upper().str.strip().dropna().unique()
+        return set(codes)
+    except Exception:
+        return None
+
+
 def get_all_entities(db_path: Path) -> pd.DataFrame:
     """Get all entities from index as DataFrame."""
     if not db_path.exists():
