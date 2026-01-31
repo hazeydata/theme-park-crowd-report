@@ -165,7 +165,7 @@ def build_posted_aggregates(
             # More recent dates get higher weight
             park_date_dt = pd.to_datetime(df_posted["park_date"], errors="coerce")
             today_dt = pd.Timestamp(date.today())
-            days_ago = (today_dt - park_date_dt).days
+            days_ago = (today_dt - park_date_dt).dt.days
             df_posted["recency_weight"] = 1.0 / (1.0 + days_ago / 365.0)
             
             # Select columns

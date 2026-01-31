@@ -100,6 +100,9 @@ fi
 cd "$PROJECT_ROOT"
 ensure_logs_dir "$OUTPUT_BASE"
 
+# Pipeline status file for dashboard
+$PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" pipeline-start 2>/dev/null || true
+
 # Single daily log (append so multiple runs same day accumulate)
 LOG_FILE="$OUTPUT_BASE/logs/daily_pipeline_$(date '+%Y-%m-%d').log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Daily pipeline started. Output base: $OUTPUT_BASE" >> "$LOG_FILE"
@@ -137,9 +140,13 @@ FAILED_ANY=false
 # 1. ETL (incremental)
 if $SKIP_ETL; then
     log_info "=== ETL (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step etl done 2>/dev/null || true
 else
-    if ! run_step "ETL (incremental)" "$SCRIPT_DIR/run_etl.sh" --output-base "$OUTPUT_BASE"; then
+    if run_step "ETL (incremental)" "$SCRIPT_DIR/run_etl.sh" --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step etl done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step etl failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
@@ -147,9 +154,13 @@ fi
 # 2. Dimension fetches
 if $SKIP_DIMENSIONS; then
     log_info "=== Dimension fetches (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step dimensions done 2>/dev/null || true
 else
-    if ! run_step "Dimension fetches" "$SCRIPT_DIR/run_dimension_fetches.sh" --output-base "$OUTPUT_BASE"; then
+    if run_step "Dimension fetches" "$SCRIPT_DIR/run_dimension_fetches.sh" --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step dimensions done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step dimensions failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
@@ -157,9 +168,13 @@ fi
 # 3. Posted aggregates
 if $SKIP_AGGREGATES; then
     log_info "=== Posted aggregates (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step aggregates done 2>/dev/null || true
 else
-    if ! run_step "Posted aggregates" $PYTHON scripts/build_posted_aggregates.py --output-base "$OUTPUT_BASE"; then
+    if run_step "Posted aggregates" $PYTHON scripts/build_posted_aggregates.py --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step aggregates done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step aggregates failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
@@ -167,19 +182,27 @@ fi
 # 4. Wait time DB report
 if $SKIP_REPORT; then
     log_info "=== Wait time DB report (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step report done 2>/dev/null || true
 else
-    if ! run_step "Wait time DB report" $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 --output-base "$OUTPUT_BASE"; then
+    if run_step "Wait time DB report" $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step report done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step report failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
 
-# 5. Batch training
+# 5. Batch training (train_batch_entities.py updates status file for entities)
 if $SKIP_TRAINING; then
     log_info "=== Batch training (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step training done 2>/dev/null || true
 else
-    if ! run_step "Batch training" $PYTHON scripts/train_batch_entities.py --min-age-hours 24 --output-base "$OUTPUT_BASE"; then
+    if run_step "Batch training" $PYTHON scripts/train_batch_entities.py --min-age-hours 24 --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step training done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step training failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
@@ -187,9 +210,13 @@ fi
 # 6. Forecast
 if $SKIP_FORECAST; then
     log_info "=== Forecast (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step forecast done 2>/dev/null || true
 else
-    if ! run_step "Forecast" $PYTHON scripts/generate_forecast.py --output-base "$OUTPUT_BASE"; then
+    if run_step "Forecast" $PYTHON scripts/generate_forecast.py --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step forecast done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step forecast failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi
@@ -197,9 +224,13 @@ fi
 # 7. WTI
 if $SKIP_WTI; then
     log_info "=== WTI (skipped) ==="
+    $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step wti done 2>/dev/null || true
 else
-    if ! run_step "WTI" $PYTHON scripts/calculate_wti.py --output-base "$OUTPUT_BASE"; then
+    if run_step "WTI" $PYTHON scripts/calculate_wti.py --output-base "$OUTPUT_BASE"; then
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step wti done 2>/dev/null || true
+    else
         FAILED_ANY=true
+        $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step wti failed 2>/dev/null || true
         $STOP_ON_ERROR && exit 1
     fi
 fi

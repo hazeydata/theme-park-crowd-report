@@ -124,6 +124,22 @@ nohup bash scripts/run_queue_times_loop.sh --interval 300 >> "output_base/logs/q
 python scripts/check_prerequisites.py
 ```
 
+### Dashboard (pipeline + queue-times + entities)
+
+Single-page status dashboard (Python Dash). Refreshes every 5 minutes. Optional Basic Auth for sharing (e.g. with wilma).
+
+```bash
+# Run (no auth)
+python dashboard/app.py
+
+# Run with auth (share URL + credentials)
+DASH_USER=admin DASH_PASSWORD=your-secret python dashboard/app.py
+```
+
+- **URL:** http://localhost:8050 or http://\<this-machine-ip\>:8050 (binds to 0.0.0.0)
+- **Data:** Reads `output_base/state/pipeline_status.json` (written by daily pipeline and train_batch_entities) and `output_base/state/entity_index.sqlite`; checks queue-times process via `pgrep`
+- See **dashboard/README.md** for details
+
 ---
 
 ## 6. Other docs

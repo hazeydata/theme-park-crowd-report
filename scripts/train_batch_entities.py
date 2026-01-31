@@ -40,6 +40,7 @@ if str(Path(__file__).parent.parent / "src") not in sys.path:
 from processors.entity_index import get_entities_needing_modeling, get_valid_entity_codes
 from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
+from utils.pipeline_status import training_set_current, training_set_entities
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:
@@ -292,6 +293,16 @@ def main() -> None:
         logger.info("Skipping park hours features")
     logger.info("")
 
+    # Write entity list to pipeline status for dashboard
+    try:
+        entities_for_status = [
+            {"code": code, "name": format_entity_display(code, base)}
+            for code in entities_to_train
+        ]
+        training_set_entities(base, entities_for_status)
+    except Exception as e:
+        logger.debug("Could not update pipeline status: %s", e)
+
     # Train each entity
     start_time = time.time()
     results = {
@@ -303,7 +314,12 @@ def main() -> None:
         entity_display = format_entity_display(entity_code, base)
         logger.info("-" * 60)
         logger.info(f"[{i}/{len(entities_to_train)}] Training {entity_display}...")
-        
+
+        try:
+            training_set_current(base, i, entity_code, "running")
+        except Exception:
+            pass
+
         success, message = train_single_entity(
             entity_code,
             base,
@@ -320,10 +336,18 @@ def main() -> None:
         if success:
             results["success"].append(entity_code)
             logger.info(f"  {message}")
+            try:
+                training_set_current(base, i, entity_code, "done")
+            except Exception:
+                pass
         else:
             results["failed"].append((entity_code, message))
             logger.warning(f"  {message}")
-    
+            try:
+                training_set_current(base, i, entity_code, "failed")
+            except Exception:
+                pass
+
     # Summary
     total_time = time.time() - start_time
     
