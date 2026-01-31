@@ -1,5 +1,7 @@
 # Documentation Review Summary
 
+**Status:** Snapshot of implementation decisions (5‑min intervals, forecast, posted aggregates). Forecast script, 5‑min generation, and posted aggregates exist. For current spec see **MODELING_AND_WTI_METHODOLOGY.md**.
+
 Complete review of documentation to identify key decisions and requirements before proceeding with implementation.
 
 ---

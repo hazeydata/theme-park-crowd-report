@@ -1,0 +1,21 @@
+---
+description: Keep the "where we are" doc (docs/PIPELINE_STATE.md) up to date when pipeline setup changes
+alwaysApply: true
+---
+
+# Pipeline state doc
+
+**docs/PIPELINE_STATE.md** is the single "where we are" reference (config paths, cron, queue-times, dashboard, commands).
+
+When you change any of the following, update **docs/PIPELINE_STATE.md** so it stays accurate:
+
+- **output_base** or default paths (config examples, `src/utils/paths.py`, config README)
+- **Cron** (what runs when, `scripts/install_cron.sh`, `run_daily_pipeline.sh`, LINUX_CRON_SETUP)
+- **Queue-times** (how it runs, systemd service, `install_queue_times_service.sh`, `queue-times-loop.service`)
+- **Dashboard** (how to run it, what it reads, `dashboard/app.py` or README)
+- **Key paths** (state/, logs/, aggregates/, etc. under output_base)
+- **Commands** (manual daily run, queue-times manual/systemd, prerequisites)
+
+If you only change application logic (e.g. parsers, training, ETL logic) and not *where* things run or *how* to run them, you don't need to update PIPELINE_STATE.
+
+When in doubt, skim PIPELINE_STATE and adjust the summary table, paths, or command blocks to match the current setup.

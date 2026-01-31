@@ -37,6 +37,8 @@ See LINUX_CRON_SETUP.md for details.
 
 ## What’s in Cron (Daily)
 
+**This setup uses a single 6:00 AM daily master** (`run_daily_pipeline.sh`). The table below describes the **five separate jobs** option if you install with `install_cron.sh` (no `--daily-master`).
+
 | Time (ET) | Task | Script |
 |-----------|------|--------|
 | 5:00 AM | Main ETL (incremental) | `run_etl.sh` |

@@ -270,19 +270,10 @@ python scripts/inspect_entity_index.py --limit 50
 
 **Options**: `--output-base`, `--needing-modeling` (show only entities needing re-modeling), `--limit` (default: 20).
 
-## Potential Future Scripts
+## Additional Scripts (summary)
 
-Examples of scripts that might go here:
-- Data validation scripts
-- One-off data migration scripts
-- **Modeling pipeline scripts**:
-  - `generate_forecast.py` — Generate predicted ACTUAL and POSTED for future dates
-  - `generate_backfill.py` — Generate historical ACTUAL curves using with-POSTED model
-  - `calculate_wti.py` — Calculate Wait Time Index from curves
-  - `test_modeling_pipeline.py` — Test the complete modeling pipeline with small subset
-
-- Reporting and analysis scripts
-- Maintenance utilities
+- **Modeling pipeline**: `build_posted_aggregates.py`, `train_batch_entities.py`, `train_entity_model.py`, `generate_forecast.py`, `generate_backfill.py`, `calculate_wti.py`, `test_modeling_pipeline.py` — see [README.md](../README.md) and [docs/MODELING_AND_WTI_METHODOLOGY.md](../docs/MODELING_AND_WTI_METHODOLOGY.md).
+- **Pipeline status**: `update_pipeline_status.py` — used by `run_daily_pipeline.sh` and `train_batch_entities.py` to write `state/pipeline_status.json` for the dashboard.
 
 ## Running Scripts
 
@@ -410,15 +401,29 @@ Install/remove cron jobs equivalent to Windows scheduled tasks.
 ./scripts/install_cron.sh --remove
 ```
 
+### `install_queue_times_service.sh`
+
+Install or remove the queue-times loop as a systemd service (starts on boot).
+
+```bash
+# Install and enable (run once; needs sudo)
+sudo bash scripts/install_queue_times_service.sh
+
+# Remove service and disable on boot
+sudo bash scripts/install_queue_times_service.sh --remove
+```
+
+The service uses user **fred** and project path from the script; edit `scripts/queue-times-loop.service` if needed.
+
 ### `queue-times-loop.service`
 
-Systemd service file for running the queue-times fetcher as a system service.
+Systemd unit file; installed by `install_queue_times_service.sh`. To install manually:
 
 ```bash
 sudo cp scripts/queue-times-loop.service /etc/systemd/system/
-# Edit paths, then:
+# Edit paths/user if needed, then:
 sudo systemctl daemon-reload
 sudo systemctl enable --now queue-times-loop
 ```
 
-See [docs/LINUX_SETUP.md](../docs/LINUX_SETUP.md) for complete Linux setup guide.
+See [LINUX_CRON_SETUP.md](../LINUX_CRON_SETUP.md) and [docs/PIPELINE_STATE.md](../docs/PIPELINE_STATE.md) for complete Linux setup.

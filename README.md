@@ -378,7 +378,9 @@ Files that fail (parse errors, connection errors, etc.):
 
 ## Scheduling
 
-### Configured Tasks (5 AM, 6 AM, 7 AM Eastern)
+**On Linux:** See [LINUX_CRON_SETUP.md](LINUX_CRON_SETUP.md) and [docs/PIPELINE_STATE.md](docs/PIPELINE_STATE.md) for cron (single 6 AM daily pipeline or five separate jobs) and the queue-times systemd service.
+
+### Configured Tasks (Windows: 5 AM, 6 AM, 7 AM Eastern)
 
 Three Windows scheduled tasks run **daily**:
 
@@ -414,6 +416,10 @@ The script uses `C:\Python314\python.exe` and project root `d:\GitHub\hazeydata\
 
 ## Monitoring
 
+### Dashboard (pipeline + queue-times + entities)
+
+Run `python dashboard/app.py` for a single-page status dashboard (pipeline steps, queue-times job, sample of recent times, entities table). Refreshes every 5 minutes. Optional Basic Auth for sharing. See [dashboard/README.md](dashboard/README.md).
+
 ### Log Files
 
 Check **`output_base/logs/`** for detailed processing logs (output_base from `config/config.json` or the default path):
@@ -427,6 +433,7 @@ Check **`output_base/logs/`** for detailed processing logs (output_base from `co
 - **`state/failed_files.json`**: Tracks files that failed (parse/connection errors). Old, repeatedly-failed files are skipped.
 - **`state/dedupe.sqlite`**: Deduplication database (grows over time)
 - **`state/entity_index.sqlite`**: Entity metadata index (latest observation dates, timestamps, row counts per entity)
+- **`state/pipeline_status.json`**: Pipeline and training step status (written by run_daily_pipeline.sh and train_batch_entities.py; read by dashboard)
 - **`state/processing.lock`**: Prevents multiple instances from running at once
 
 **Why track state**: Enables incremental processing, prevents duplicate work, and avoids retrying files that cannot be parsed.

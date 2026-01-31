@@ -2,7 +2,7 @@
 
 **Purpose:** Unify where the pipeline writes (one `output_base`), eliminate duplicate `logs/` and split outputs between GitHub vs Dropbox, and make the layout configurable and maintainable.
 
-**Status:** Implemented. See `src/utils/paths.py`, `config/README.md`, and the changes to ETL, `run_dimension_fetches.ps1`, `run_queue_times_loop.ps1`, dimension scripts, and docs.
+**Status:** Implemented. This is a historical design doc. For current layout see **config/README.md** and **docs/PIPELINE_STATE.md**.
 
 ---
 

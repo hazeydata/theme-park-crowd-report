@@ -7,58 +7,86 @@ This document describes the folder structure and organization of the Theme Park 
 ```
 theme-park-crowd-report/
 ├── src/                              # Main source code package
-│   ├── __init__.py                   # Package marker
-│   ├── get_tp_wait_time_data_from_s3.py  # Main ETL script
-│   ├── get_entity_table_from_s3.py   # Entity dimension table from S3
-│   ├── get_park_hours_from_s3.py     # Park hours dimension table from S3
-│   ├── get_events_from_s3.py         # Events dimension tables from S3
-│   ├── get_metatable_from_s3.py      # Metatable (park-day metadata) from S3
-│   ├── build_dimdategroupid.py       # Date + holidays + date_group_id (built locally)
-│   ├── build_dimseason.py            # Season + season_year from dimdategroupid (built locally)
-│   ├── parsers/                      # Data parsers for different formats
-│   │   ├── __init__.py
+│   ├── __init__.py
+│   ├── get_tp_wait_time_data_from_s3.py   # Main ETL (S3 wait times)
+│   ├── get_wait_times_from_queue_times.py # Live queue-times.com fetcher → staging
+│   ├── get_entity_table_from_s3.py
+│   ├── get_park_hours_from_s3.py
+│   ├── get_events_from_s3.py
+│   ├── get_metatable_from_s3.py
+│   ├── build_dimdategroupid.py
+│   ├── build_dimseason.py
+│   ├── build_entity_index.py         # Entity index (state/entity_index.sqlite)
+│   ├── build_park_hours_donor.py
+│   ├── clean_*.py                    # Dimension cleaners
+│   ├── migrate_park_hours_to_versioned.py
+│   ├── inspect_dimension_tables.py
+│   ├── parsers/
 │   │   └── wait_time_parsers.py      # Standby and fastpass parsers
-│   ├── processors/                   # Data processing modules (reserved for future use)
-│   │   └── __init__.py
-│   └── utils/                         # Utility functions
-│       ├── __init__.py
-│       └── file_identification.py    # File type classifier
+│   ├── processors/                  # Modeling, aggregates, features, entity index
+│   │   ├── encoding.py
+│   │   ├── entity_index.py
+│   │   ├── features.py
+│   │   ├── training.py
+│   │   ├── posted_aggregates.py
+│   │   └── park_hours_versioning.py
+│   └── utils/
+│       ├── file_identification.py
+│       ├── paths.py                 # get_output_base from config
+│       ├── pipeline_status.py       # pipeline_status.json helpers
+│       └── entity_names.py
 │
-├── scripts/                           # Standalone executable scripts (currently empty)
-│   └── README.md
-│
-├── tests/                             # Test suite (currently empty)
-│   └── __init__.py
-│
-├── config/                            # Configuration files
+├── scripts/                          # Entrypoints and automation
 │   ├── README.md
-│   └── config.example.json           # Template; copy to config.json (gitignored) and set output_base
+│   ├── run_daily_pipeline.sh         # Master: ETL → dimensions → aggregates → report → training → forecast → WTI
+│   ├── run_etl.sh, run_dimension_fetches.sh, run_queue_times_loop.sh
+│   ├── install_cron.sh, install_queue_times_service.sh
+│   ├── queue-times-loop.service
+│   ├── build_posted_aggregates.py, train_batch_entities.py, train_entity_model.py
+│   ├── generate_forecast.py, generate_backfill.py, calculate_wti.py
+│   ├── report_wait_time_db.py, validate_wait_times.py, check_prerequisites.py
+│   ├── update_pipeline_status.py
+│   └── ... (see scripts/README.md)
 │
-├── data/                              # Data directories (gitignored)
+├── dashboard/                       # Pipeline status dashboard (Dash)
+│   ├── app.py
+│   └── README.md
+│
+├── config/
 │   ├── README.md
-│   ├── raw/                          # Raw data files (not currently used)
-│   └── processed/                    # Processed data files (not currently used)
+│   ├── config.example.json          # Template (Windows/generic)
+│   └── config.linux.example.json    # Template for Linux
 │
-├── work/                              # Working directory for intermediate files (gitignored)
+├── docs/                            # Schema, methodology, setup
+│   ├── SCHEMA.md, SCHEMAS.md
+│   ├── PIPELINE_STATE.md            # Current setup (paths, cron, queue-times)
+│   ├── ENTITY_INDEX.md, MODELING_AND_WTI_METHODOLOGY.md
+│   ├── LINUX_SETUP.md, REFRESH_READINESS.md
+│   └── ... (see README.md “See Also”)
+│
+├── tests/
+│   ├── __init__.py
+│   └── test_entity_index.py
+│
+├── temp/                            # Temporary files (gitignored)
 │   └── README.md
 │
-├── temp/                              # Temporary files directory (gitignored)
+├── web/                             # Static site (Figma → HTML)
+│   ├── index.html, styles.css
+│   └── FIGMA_TO_HTML.md, DEPLOY.md
+│
+├── julia/                           # Optional Julia app (separate)
 │   └── README.md
 │
-├── output/                            # Optional dev output (gitignored); production uses output_base from config
-│   └── README.md
-│
-├── venv/                              # Python virtual environment (gitignored)
-├── requirements.txt                  # Python package dependencies
-├── .gitignore                        # Git ignore rules
-├── README.md                         # Main project documentation
-├── PROJECT_STRUCTURE.md              # This file
-├── CHANGES.md                        # Change log
-├── CONNECTION_ERROR_FIX.md           # Connection error handling
-├── CONCURRENT_EXECUTION_FIX.md       # Process lock and concurrent run prevention
-├── docs/                             # Schema and contract docs
-│   └── SCHEMA.md                     # Fact table columns, observed_at, wait_time_type, sources
-└── OUTPUT_LAYOUT_REVIEW.md           # Output layout and config (implemented)
+├── requirements.txt
+├── README.md
+├── PROJECT_STRUCTURE.md
+├── CHANGES.md
+├── LINUX_CRON_SETUP.md
+├── CONNECTION_ERROR_FIX.md
+├── CONCURRENT_EXECUTION_FIX.md
+├── OUTPUT_LAYOUT_REVIEW.md
+└── REFACTORING_NOTES.md
 ```
 
 ## Directory Purposes
@@ -106,53 +134,36 @@ Contains all application logic organized into modules:
   - `parse_fastpass_stream()`: Parses fastpass/priority data (handles old and new formats)
   - Ported from proven Julia codebase for accuracy
   
-- **`utils/file_identification.py`**: File type classifier
-  - `get_wait_time_filetype()`: Determines if file is Standby, New Fastpass, Old Fastpass, or Unknown
-  - Uses filename patterns to classify (ported from Julia)
+- **`get_wait_times_from_queue_times.py`**: Fetches live wait times from queue-times.com API; writes to `staging/queue_times/`; morning ETL merges into fact_tables.
 
-**Why modular**: Separates concerns, makes testing easier, allows updating parsers independently.
+- **`parsers/wait_time_parsers.py`**: Standby and fastpass parsers (ported from Julia).
 
-### `scripts/` - Standalone Scripts
+- **`processors/`**: Modeling and data prep — `entity_index.py` (state/entity_index.sqlite), `training.py` (XGBoost/mean models), `posted_aggregates.py` (hourly POSTED aggregates), `features.py`, `encoding.py`, `park_hours_versioning.py`.
 
-Reserved for standalone executable scripts that can be run independently. Currently empty but available for future utility scripts.
+- **`utils/file_identification.py`**: File type classifier. **`utils/paths.py`**: `get_output_base()` from config. **`utils/pipeline_status.py`**: Helpers for `state/pipeline_status.json`.
 
-**Why separate**: Keeps main application code separate from utility scripts.
+**Why modular**: Separates concerns, makes testing easier, allows updating parsers and processors independently.
+
+### `scripts/` - Entrypoints and Automation
+
+Pipeline runners, reports, and scheduling: `run_daily_pipeline.sh` (master), `run_etl.sh`, `run_dimension_fetches.sh`, `run_queue_times_loop.sh`, `install_cron.sh`, `install_queue_times_service.sh`, `build_posted_aggregates.py`, `train_batch_entities.py`, `generate_forecast.py`, `calculate_wti.py`, `report_wait_time_db.py`, `validate_wait_times.py`, and others. See [scripts/README.md](scripts/README.md).
+
+### `dashboard/` - Pipeline Status Dashboard
+
+Single-page Dash app: pipeline step status, queue-times job, entities table. Refreshes every 5 minutes. See [dashboard/README.md](dashboard/README.md).
+
+### `config/` - Configuration
+
+- **`config.example.json`** / **`config.linux.example.json`**: Templates; copy to `config.json` (gitignored) and set `output_base`. All pipeline scripts use this for data and logs.
+- **`queue_times_entity_mapping.csv`**: Maps queue-times.com ride IDs to TouringPlans `entity_code` (if present).
 
 ### `tests/` - Test Suite
 
-Reserved for unit tests, integration tests, and test fixtures. Currently empty but structure is in place for future testing.
-
-**Why**: Testing ensures code quality and prevents regressions.
-
-### `config/` - Configuration Files
-
-Contains configuration templates and examples:
-
-- **`config.example.json`**: Example configuration file (if needed in future)
-- Configuration is currently handled via command-line arguments
-
-**Why**: Centralizes configuration management.
-
-### `data/` - Data Storage
-
-Directories for raw and processed data files. Currently not used (data is streamed directly from S3), but available for future use.
-
-- **`raw/`**: Would store raw data files if downloaded locally
-- **`processed/`**: Would store intermediate processed files if needed
-
-**Why**: Provides structure for future data storage needs.
-
-### `work/` - Working Directory
-
-Temporary working files during processing. Can be cleaned up between runs.
-
-**Why**: Keeps temporary files organized and separate from output.
+Unit and integration tests (e.g. `test_entity_index.py`). Run from project root.
 
 ### `temp/` - Temporary Files
 
-Temporary files directory. Can be cleaned up between runs.
-
-**Why**: Provides a dedicated space for truly temporary files.
+Temporary files directory (gitignored). Can be cleaned up between runs.
 
 ### `output/` - Optional Dev Output
 
@@ -162,20 +173,26 @@ The output structure under an output_base is:
 ```
 output_base/
 ├── fact_tables/clean/YYYY-MM/    # CSV files by park and date
-├── dimension_tables/             # dimentity, dimparkhours, dimeventdays, dimevents, dimmetatable, dimdategroupid, dimseason
-├── samples/YYYY-MM/              # Sample CSV files
-├── state/                        # dedupe.sqlite, processed_files.json, failed_files.json, processing.lock
+├── dimension_tables/             # dimentity, dimparkhours, dimdategroupid, dimseason, etc.
 ├── staging/queue_times/          # Queue-times fetcher staging (merged by morning ETL)
+├── state/                        # dedupe.sqlite, entity_index.sqlite, pipeline_status.json, lock files
+├── aggregates/                   # posted_aggregates.parquet
+├── models/                       # Per-entity XGBoost/mean models
+├── curves/forecast/              # Forecast curves
+├── reports/                      # wait_time_db_report.md, etc.
 ├── validation/                   # validate_wait_times.py JSON reports
-├── reports/                      # report_wait_time_db.py Markdown
-└── logs/                         # All pipeline logs (ETL, dimension scripts, queue-times)
+└── logs/                         # All pipeline logs
 ```
 
 **Why separate from code**: Keeps data separate from source code; one output_base gives one `logs/` and one set of dimension_tables.
 
 ### `docs/` - Schema and contract docs
 
-**`SCHEMA.md`**: Fact table columns (`entity_code`, `observed_at`, `wait_time_type`, `wait_time_minutes`), `observed_at` semantics and 6am rule, `wait_time_type` ranges, sources (S3, queue-times), and path layout. Used by validation, reports, and modeling.
+- **SCHEMA.md**, **SCHEMAS.md**: Fact table columns, dimension schemas, column naming.
+- **PIPELINE_STATE.md**: Current setup (paths, cron, queue-times, dashboard).
+- **ENTITY_INDEX.md**, **MODELING_AND_WTI_METHODOLOGY.md**: Entity index and modeling.
+- **LINUX_SETUP.md**, **REFRESH_READINESS.md**: Linux setup and refresh order.
+- Others: ATTRACTION_IO_ALIGNMENT, LEGACY_PIPELINE_CRITICAL_REVIEW, PARK_HOURS_VERSIONING, STALE_OBSERVED_AT, etc. See [README.md](README.md) “See Also”.
 
 ## File Organization Principles
 
@@ -199,7 +216,6 @@ from utils import get_wait_time_filetype
 
 ## Usage Notes
 
-- Data and output directories (`data/`, `work/`, `temp/`, `output/`) are gitignored; logs live under `output_base/logs/` and are not in the repo
-- README files in these directories are tracked to document their purpose
-- The `src/` directory is a Python package - modules can be imported
-- Scripts should be run from the project root directory
+- `temp/` and `output/` (optional dev output) are gitignored; production data and logs live under **output_base** from config.
+- The `src/` directory is a Python package — run scripts from project root so imports resolve.
+- Current “where we are” (Linux, cron, queue-times, dashboard): [docs/PIPELINE_STATE.md](docs/PIPELINE_STATE.md).

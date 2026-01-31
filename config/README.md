@@ -4,19 +4,22 @@ This directory contains configuration files and templates for the Theme Park Wai
 
 ## Queue-Times Lookup
 
-**`queue_times_entity_mapping.csv`** — Master lookup from queue-times.com ride IDs to TouringPlans `entity_code`. Used by `src/get_wait_times_from_queue_times.py`. Columns: `entity_code`, `park_code`, `queue_times_id`, `queue_times_name`, `touringplans_name`. Supplemental build scripts and workflow notes live in `temp/` (see `temp/QUEUE_TIMES_MAPPING_README.md`).
+**`queue_times_entity_mapping.csv`** — Master lookup from queue-times.com ride IDs to TouringPlans `entity_code`. Used by `src/get_wait_times_from_queue_times.py`. Columns: `entity_code`, `park_code`, `queue_times_id`, `queue_times_name`, `touringplans_name`.
 
 ## Output Base (config.json)
 
-**`config.json`** (copy from `config.example.json`) is the **single source for the pipeline output path**. It is gitignored.
+**`config.json`** (copy from an example) is the **single source for the pipeline output path**. It is gitignored.
+
+- **`config.example.json`** — Template for Windows/generic. Copy to `config.json` and set `output_base`.
+- **`config.linux.example.json`** — Template for Linux (e.g. Dropbox under home). Copy to `config.json` and set `output_base` to your path (e.g. `~/TouringPlans.com Dropbox/.../theme-park-crowd-report`).
 
 - **`output_base`**: Absolute path where the pipeline writes: `fact_tables/`, `dimension_tables/`, `state/`, `logs/`, etc.  
-  Example: `D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report`  
-  (On some machines Dropbox may be `D:\TouringPlans.com Dropbox\...` — set `output_base` to your actual path.)
+  Example (Windows): `D:\Dropbox (TouringPlans.com)\stats team\pipeline\hazeydata\theme-park-crowd-report`  
+  Example (Linux): `/home/user/TouringPlans.com Dropbox/.../theme-park-crowd-report`
 
 **Setup**:
 
-1. Copy `config.example.json` to `config.json`.
+1. Copy `config.example.json` or `config.linux.example.json` to `config.json`.
 2. Set `output_base` to your chosen output folder (e.g. your Dropbox pipeline folder).
 
 If `config.json` is missing or has no `output_base`, the code falls back to the same default used in `config.example.json`. All of the following use this: 5am/7am ETL, 6am dimension fetch, `run_queue_times_loop.ps1`, `validate_wait_times.py`, `report_wait_time_db.py`, and the dimension/queue-times Python scripts when run without `--output-base`.

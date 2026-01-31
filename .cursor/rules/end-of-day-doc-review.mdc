@@ -1,0 +1,15 @@
+---
+description: At end of day, suggest a quick documentation review using the daily checklist
+alwaysApply: true
+---
+
+# End-of-day documentation review
+
+The project keeps a **daily documentation review** at end of day so docs stay in sync.
+
+When the user says they're wrapping up, finishing for the day, or similar end-of-day language:
+
+1. **Suggest** a quick documentation review: "Want to do a quick end-of-day doc review? Checklist: docs/DAILY_DOCUMENTATION_REVIEW.md"
+2. **Don't** run the full review unless they say yes; a short prompt is enough.
+
+The checklist in **docs/DAILY_DOCUMENTATION_REVIEW.md** covers PIPELINE_STATE, README, scripts/config READMEs, and when to touch PROJECT_STRUCTURE or other docs.

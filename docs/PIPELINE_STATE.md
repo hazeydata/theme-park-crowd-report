@@ -2,6 +2,8 @@
 
 Single reference for the current Theme Park pipeline setup (Linux, user **fred**). Updated when config, cron, or services change.
 
+**When you change** config paths, cron, queue-times, or dashboard setup, **update this file.** (A project rule reminds the AI to keep it in sync.)
+
 ---
 
 ## 1. Current setup (summary)
@@ -144,6 +146,7 @@ DASH_USER=admin DASH_PASSWORD=your-secret python dashboard/app.py
 
 ## 6. Other docs
 
+- **docs/DAILY_DOCUMENTATION_REVIEW.md** — End-of-day checklist to keep PIPELINE_STATE, README, and key docs in sync.
 - **LINUX_CRON_SETUP.md** — Cron options (five separate jobs vs single daily master), queue-times service, log paths.
 - **docs/REFRESH_READINESS.md** — Full refresh order, what’s in/out of cron, common gaps.
 - **scripts/README.md** — All scripts (run_daily_pipeline.sh, install_cron.sh, install_queue_times_service.sh, etc.).
