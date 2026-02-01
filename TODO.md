@@ -1,5 +1,22 @@
 # TODO / Pinned Reminders
 
+## 🚨 PRIORITY: Training Speed Optimization (FOR BAM-BAM)
+
+**From Wilma (Jan 31, 2026) — Fred approved, go aggressive.**
+
+Full details: [docs/TRAINING_OPTIMIZATION.md](docs/TRAINING_OPTIMIZATION.md)
+
+### Phase 1 — Do Now
+1. **Early stopping**: `src/processors/training.py` line ~246 → `EARLY_STOPPING_ROUNDS = 50`
+2. **Priority sort**: `scripts/train_batch_entities.py` → WDW parks first (MK, EP, HS, AK)
+
+### Phase 2 — Then
+3. **Parallelization**: `ProcessPoolExecutor` in `train_batch_entities.py`, use 80% available RAM
+
+**Fred's words:** "Accept small accuracy loss for big speed gain. Use as much RAM as you can."
+
+---
+
 ## Queue-Times: Staging + Morning Merge (DONE)
 
 **Implemented**: The queue-times scraper writes to **`staging/queue_times/YYYY-MM/{park}_{date}.csv`** only. Fact_tables stay **static for modelling**. The **morning ETL** (S3 run) merges **yesterday's** staging into `fact_tables/clean` at the start of each run, then deletes those staged files. The scraper runs continuously (`--interval`); staging is also available for **live use** (e.g. Twitch/YouTube).

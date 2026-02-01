@@ -1,0 +1,40 @@
+---
+description: PRIORITY TASK from Wilma - Training speed optimization
+globs: ["src/processors/training.py", "scripts/train_batch_entities.py"]
+alwaysApply: false
+---
+
+# 🚨 PRIORITY: Training Speed Optimization
+
+**Read this first:** [docs/TRAINING_OPTIMIZATION.md](../../docs/TRAINING_OPTIMIZATION.md)
+
+Fred has approved aggressive optimization. Key changes needed:
+
+## Phase 1 — DO NOW (70%+ speedup)
+
+### 1. Enable Early Stopping
+File: `src/processors/training.py` (around line 246)
+```python
+# Change this:
+EARLY_STOPPING_ROUNDS = None  # Julia legacy
+
+# To this:
+EARLY_STOPPING_ROUNDS = 50  # Fred approved - trees converge at ~400 vs 2000
+```
+
+### 2. Priority Sort (WDW first)
+File: `scripts/train_batch_entities.py`
+- Sort entities so MK, EP, HS, AK train first
+- Then by observation count descending
+
+## Phase 2 — Parallelization
+
+File: `scripts/train_batch_entities.py`
+- Use `ProcessPoolExecutor` 
+- Detect available RAM with `psutil`
+- Set aggressive MAX_WORKERS (use 80% available RAM)
+
+## Fred's Exact Words
+> "Accept small accuracy sacrifice for big speed gain. Use as much RAM as you can without affecting other processes. Focus on speed first."
+
+**Don't hold back. Go aggressive.**
