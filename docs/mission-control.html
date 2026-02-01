@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦴 Mission Control — Hazeydata</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --navy: #0a1628;
+            --navy-light: #1e3a5f;
+            --red: #A60038;
+            --cyan: #4a90a4;
+            --white: #ffffff;
+            --gray: #94a3b8;
+            --green: #22c55e;
+            --yellow: #eab308;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, var(--navy) 0%, #0f172a 100%);
+            min-height: 100vh;
+            color: var(--white);
+            padding: 20px;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        h1 { font-size: 2rem; display: flex; align-items: center; gap: 10px; }
+        h1 span { font-size: 2.5rem; }
+        
+        .timestamp { color: var(--gray); font-size: 0.9rem; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--cyan);
+        }
+        
+        .card.priority { border-left: 4px solid var(--red); }
+        .card.success { border-left: 4px solid var(--green); }
+        
+        .task-list { list-style: none; }
+        .task-list li {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .task-list li:last-child { border-bottom: none; }
+        
+        .status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .status.urgent { background: var(--red); }
+        .status.active { background: var(--green); }
+        .status.waiting { background: var(--yellow); color: var(--navy); }
+        
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .link-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: var(--white);
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .link-btn:hover { background: rgba(255,255,255,0.2); }
+        
+        .date-card {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .date-card:last-child { border-bottom: none; }
+        .days-out {
+            background: var(--navy-light);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+        
+        .crew-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .crew-member {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+        .crew-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--navy-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        .crew-info { flex: 1; }
+        .crew-name { font-weight: 600; font-size: 0.9rem; }
+        .crew-role { font-size: 0.75rem; color: var(--gray); }
+        
+        .intel-item {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .intel-item:last-child { border-bottom: none; }
+        .intel-item strong { color: var(--cyan); }
+        
+        .full-width { grid-column: 1 / -1; }
+        
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+            .links-grid { grid-template-columns: 1fr; }
+            .crew-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span>🦴</span> Mission Control</h1>
+            <div class="timestamp">Updated: <span id="timestamp"></span></div>
+        </header>
+        
+        <div class="grid">
+            <!-- Today's Focus -->
+            <div class="card priority">
+                <h2>🎯 Today's Focus</h2>
+                <ul class="task-list">
+                    <li>
+                        <span class="status urgent">TODAY</span>
+                        <span>Review Pebbles' stream design specs</span>
+                    </li>
+                    <li>
+                        <span class="status active">READY</span>
+                        <span>Bam-Bam: Implement pipeline optimization</span>
+                    </li>
+                    <li>
+                        <span class="status waiting">WAITING</span>
+                        <span>Mac Mini arrives in 3 days</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Quick Links -->
+            <div class="card">
+                <h2>🔗 Quick Links</h2>
+                <div class="links-grid">
+                    <a href="https://github.com/hazeydata/theme-park-crowd-report" class="link-btn" target="_blank">
+                        🐙 GitHub Repo
+                    </a>
+                    <a href="https://hazeydata.ai" class="link-btn" target="_blank">
+                        🌐 hazeydata.ai
+                    </a>
+                    <a href="https://dash.cloudflare.com" class="link-btn" target="_blank">
+                        ☁️ Cloudflare
+                    </a>
+                    <a href="https://figma.com" class="link-btn" target="_blank">
+                        🎨 Figma
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Key Dates -->
+            <div class="card">
+                <h2>📅 Key Dates</h2>
+                <div class="date-card">
+                    <span>🖥️ Mac Mini arrives</span>
+                    <span class="days-out">Feb 4 — 3 days</span>
+                </div>
+                <div class="date-card">
+                    <span>💰 Wilma Autonomy starts</span>
+                    <span class="days-out">Feb 4 — 3 days</span>
+                </div>
+                <div class="date-card">
+                    <span>👤 John visits</span>
+                    <span class="days-out">Feb 7 — 6 days</span>
+                </div>
+                <div class="date-card">
+                    <span>⚠️ GPT-4o retires</span>
+                    <span class="days-out">Feb 13 — 12 days</span>
+                </div>
+            </div>
+            
+            <!-- The Crew -->
+            <div class="card">
+                <h2>🧠 The Flintstones</h2>
+                <div class="crew-grid">
+                    <div class="crew-member">
+                        <div class="crew-avatar">👨</div>
+                        <div class="crew-info">
+                            <div class="crew-name">Fred</div>
+                            <div class="crew-role">The Boss</div>
+                        </div>
+                    </div>
+                    <div class="crew-member">
+                        <div class="crew-avatar">🦴</div>
+                        <div class="crew-info">
+                            <div class="crew-name">Wilma</div>
+                            <div class="crew-role">24/7 PM</div>
+                        </div>
+                    </div>
+                    <div class="crew-member">
+                        <div class="crew-avatar">💻</div>
+                        <div class="crew-info">
+                            <div class="crew-name">Bam-Bam</div>
+                            <div class="crew-role">Deep Coder</div>
+                        </div>
+                    </div>
+                    <div class="crew-member">
+                        <div class="crew-avatar">🎨</div>
+                        <div class="crew-info">
+                            <div class="crew-name">Pebbles</div>
+                            <div class="crew-role">Design</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Active Projects -->
+            <div class="card full-width">
+                <h2>🚀 Active Projects</h2>
+                <ul class="task-list">
+                    <li>
+                        <span class="status urgent">URGENT</span>
+                        <strong>Twitch Stream</strong> — Waiting on Mac Mini, overlay specs from Pebbles
+                    </li>
+                    <li>
+                        <span class="status active">IN DEV</span>
+                        <strong>Theme Park Crowd Report</strong> — Pipeline training, speed optimization with Bam-Bam
+                    </li>
+                    <li>
+                        <span class="status active">LIVE</span>
+                        <strong>hazeydata.ai</strong> — Live, needs content updates
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Theme Park Intel -->
+            <div class="card">
+                <h2>🎢 Theme Park Intel</h2>
+                <div class="intel-item">
+                    <strong>DINOSAUR closed</strong> — DinoLand making way for Tropical Americas
+                </div>
+                <div class="intel-item">
+                    <strong>Epic Universe EPA</strong> — Only select attractions during early entry (Feb 1+)
+                </div>
+                <div class="intel-item">
+                    <strong>JP River Adventure</strong> — Down until Nov 2026
+                </div>
+            </div>
+            
+            <!-- Cron Jobs -->
+            <div class="card success">
+                <h2>⏰ Automated Tasks</h2>
+                <ul class="task-list">
+                    <li>
+                        <span class="status active">OK</span>
+                        <span>Pipeline Review — Daily 3am</span>
+                    </li>
+                    <li>
+                        <span class="status active">OK</span>
+                        <span>Overnight Surprise — Daily 4am</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('timestamp').textContent = new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    </script>
+</body>
+</html>
