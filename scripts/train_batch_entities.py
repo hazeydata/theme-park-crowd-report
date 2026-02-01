@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -44,6 +46,74 @@ if str(Path(__file__).parent.parent / "src") not in sys.path:
 from processors.entity_index import get_entities_needing_modeling, get_valid_entity_codes
 from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
+
+# WDW parks first (priority sort per Wilma/Fred), then by observation count descending.
+WDW_PARK_ORDER = {"MK": 0, "EP": 1, "HS": 2, "AK": 3}
+
+# RAM per worker (GB) for auto workers; use 80% of available RAM, cap at 16 workers.
+GB_PER_WORKER = 2.0
+AUTO_WORKERS_CAP = 16
+
+
+def suggested_workers_from_ram(logger: logging.Logger | None = None) -> int:
+    """Suggest parallel workers from available RAM (80%% of avail, ~2 GB per worker, cap 16)."""
+    try:
+        import psutil
+        avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+        # Use 80% of available RAM; assume GB_PER_WORKER per worker
+        n = max(1, int(avail_gb * 0.8 / GB_PER_WORKER))
+        n = min(n, AUTO_WORKERS_CAP)
+        if logger:
+            logger.info("Auto workers from RAM: %.1f GB available → %d workers", avail_gb, n)
+        return n
+    except ImportError:
+        if logger:
+            logger.warning("psutil not installed; --workers 0 falls back to 1")
+        return 1
+
+
+def _entity_park_prefix(entity_code: str) -> str:
+    """Entity code prefix (MK, EP, TDL, TDS, etc.)."""
+    s = (entity_code or "").upper().strip()
+    m = re.search(r"\d", s)
+    return s[: m.start()] if m else s
+
+
+def _sort_entities_wdw_first_then_obs(
+    entity_codes: list[str],
+    index_db: Path,
+    logger: logging.Logger | None = None,
+) -> list[str]:
+    """Sort entities: WDW parks (MK, EP, HS, AK) first, then by observation count descending."""
+    if not entity_codes:
+        return entity_codes
+    # Load actual_count + priority_count from index
+    counts: dict[str, int] = {}
+    if index_db.exists():
+        try:
+            placeholders = ",".join("?" * len(entity_codes))
+            with sqlite3.connect(str(index_db)) as conn:
+                cursor = conn.execute(
+                    f"""SELECT entity_code,
+                            COALESCE(actual_count, 0) + COALESCE(priority_count, 0) AS obs
+                        FROM entity_index WHERE entity_code IN ({placeholders})""",
+                    entity_codes,
+                )
+                for row in cursor:
+                    counts[row[0]] = row[1] or 0
+        except Exception as e:
+            if logger:
+                logger.debug("Could not load counts for sort: %s", e)
+    for code in entity_codes:
+        if code not in counts:
+            counts[code] = 0
+    # Sort: WDW park order first, then by obs descending
+    def key(code: str) -> tuple[int, int]:
+        prefix = _entity_park_prefix(code)
+        park_order = WDW_PARK_ORDER.get(prefix, 99)
+        return (park_order, -counts.get(code, 0))
+
+    return sorted(entity_codes, key=key)
 from utils.pipeline_status import (
     training_set_current,
     training_set_entities,
@@ -249,7 +319,7 @@ def main() -> None:
         "--workers",
         type=int,
         default=1,
-        help="Number of entities to train in parallel (default: 1). Use 4–8 to finish within 24h.",
+        help="Number of entities to train in parallel (default: 1). Use 0 for auto from RAM (80%% avail, ~2 GB/worker, cap 16).",
     )
     ap.add_argument(
         "--park",
@@ -262,6 +332,10 @@ def main() -> None:
     log_dir = base / "logs"
     logger = setup_logging(log_dir)
     index_db = base / "state" / "entity_index.sqlite"
+
+    # --workers 0 = auto from RAM (80% available, ~2 GB/worker, cap 16)
+    if args.workers == 0:
+        args.workers = suggested_workers_from_ram(logger)
     train_script = Path(__file__).parent / "train_entity_model.py"
 
     logger.info("=" * 60)
@@ -345,6 +419,10 @@ def main() -> None:
         if not entities_to_train:
             logger.warning(f"No entities found for park {args.park}")
             sys.exit(0)
+    
+    # Priority sort: WDW parks first (MK, EP, HS, AK), then by observation count descending
+    entities_to_train = _sort_entities_wdw_first_then_obs(entities_to_train, index_db, logger)
+    logger.info("Sorted entities: WDW first (MK, EP, HS, AK), then by observation count desc")
     
     # Apply max limit if specified
     if args.max_entities and len(entities_to_train) > args.max_entities:

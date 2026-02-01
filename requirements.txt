@@ -21,3 +21,6 @@ scikit-learn>=1.3.0
 # Dashboard (pipeline status)
 dash>=2.14.0
 dash-auth>=2.0.0
+
+# RAM detection for training parallelism (train_batch_entities --workers 0)
+psutil>=5.9.0

@@ -97,8 +97,8 @@ DEFAULT_XGB_PARAMS = {
     "verbosity": 0,
 }
 
-# Early stopping: Julia uses watchlist=() so no early stop; we run all n_estimators rounds.
-EARLY_STOPPING_ROUNDS = None
+# Early stopping: stop if no improvement for N rounds (Fred approved; trees converge ~400 vs 2000).
+EARLY_STOPPING_ROUNDS = 50
 
 
 # =============================================================================

@@ -6,12 +6,12 @@
 
 Full details: [docs/TRAINING_OPTIMIZATION.md](docs/TRAINING_OPTIMIZATION.md)
 
-### Phase 1 — Do Now
-1. **Early stopping**: `src/processors/training.py` line ~246 → `EARLY_STOPPING_ROUNDS = 50`
-2. **Priority sort**: `scripts/train_batch_entities.py` → WDW parks first (MK, EP, HS, AK)
+### Phase 1 — Do Now ✅ (implemented)
+1. **Early stopping**: `src/processors/training.py` → `EARLY_STOPPING_ROUNDS = 50`
+2. **Priority sort**: `scripts/train_batch_entities.py` → WDW parks first (MK, EP, HS, AK), then by observation count desc
 
-### Phase 2 — Then
-3. **Parallelization**: `ProcessPoolExecutor` in `train_batch_entities.py`, use 80% available RAM
+### Phase 2 — Then ✅ (implemented)
+3. **Parallelization**: `ProcessPoolExecutor` in `train_batch_entities.py`; `--workers 0` = auto from RAM (80% avail, ~2 GB/worker, cap 16). Daily pipeline uses `--workers 0`.
 
 **Fred's words:** "Accept small accuracy loss for big speed gain. Use as much RAM as you can."
 
