@@ -221,7 +221,7 @@ python scripts/train_batch_entities.py --min-age-hours 24
 python scripts/train_batch_entities.py --max-entities 10
 ```
 
-**Options**: `--entities`, `--entity-list`, `--output-base`, `--min-age-hours` (default: 0), `--max-entities`, `--train-ratio`, `--val-ratio`, `--skip-encoding`, `--sample`, `--skip-park-hours`, `--min-observations` (default: 500), `--python`.
+**Options**: `--entities`, `--entity-list`, `--output-base`, `--min-age-hours` (default: 0), `--max-entities`, `--workers` (default: 1; use 4–8 to finish within 24h), `--train-ratio`, `--val-ratio`, `--skip-encoding`, `--sample`, `--skip-park-hours`, `--min-observations` (default: 500), `--python`.
 
 **Note:** All entity-related logging includes short names from dimentity (e.g., "AK03 - Greeting Trails") for improved readability.
 

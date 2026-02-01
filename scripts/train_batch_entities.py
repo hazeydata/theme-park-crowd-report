@@ -20,6 +20,9 @@ Usage:
     
     # Limit number of entities to train
     python scripts/train_batch_entities.py --max-entities 10
+    
+    # Train one park only (for faster test runs; use park code e.g. MK, EP, AK, BB)
+    python scripts/train_batch_entities.py --park MK
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ import logging
 import subprocess
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -40,7 +44,12 @@ if str(Path(__file__).parent.parent / "src") not in sys.path:
 from processors.entity_index import get_entities_needing_modeling, get_valid_entity_codes
 from utils.entity_names import format_entity_display
 from utils.paths import get_output_base
-from utils.pipeline_status import training_set_current, training_set_entities
+from utils.pipeline_status import (
+    training_set_current,
+    training_set_entities,
+    training_set_entity_status,
+    training_set_workers,
+)
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:
@@ -71,13 +80,14 @@ def train_single_entity(
     skip_encoding: bool,
     sample: int | None,
     skip_park_hours: bool,
-    logger: logging.Logger,
+    logger: logging.Logger | None = None,
 ) -> tuple[bool, str]:
     """
     Train a single entity by calling train_entity_model.py as a subprocess.
     
     Returns:
         (success: bool, message: str)
+    If logger is None, no logging (used from parallel workers).
     """
     cmd = [
         python_exe,
@@ -125,6 +135,44 @@ def train_single_entity(
         return False, "TIMEOUT (>1 hour)"
     except Exception as e:
         return False, f"ERROR: {str(e)[:200]}"
+
+
+def _train_entity_worker(
+    args_tuple: tuple,
+) -> tuple[str, bool, str]:
+    """
+    Worker for ProcessPoolExecutor. Must be top-level for pickling.
+    args_tuple: (entity_code, output_base, train_script, python_exe, train_ratio, val_ratio, skip_encoding, sample, skip_park_hours)
+    Returns: (entity_code, success, message)
+    """
+    (
+        entity_code,
+        output_base,
+        train_script,
+        python_exe,
+        train_ratio,
+        val_ratio,
+        skip_encoding,
+        sample,
+        skip_park_hours,
+    ) = args_tuple
+    try:
+        training_set_entity_status(output_base, entity_code, "running")
+    except Exception:
+        pass
+    success, message = train_single_entity(
+        entity_code,
+        output_base,
+        train_script,
+        python_exe,
+        train_ratio,
+        val_ratio,
+        skip_encoding,
+        sample,
+        skip_park_hours,
+        logger=None,
+    )
+    return (entity_code, success, message)
 
 
 def main() -> None:
@@ -196,6 +244,17 @@ def main() -> None:
         type=str,
         default="python3",
         help="Python executable to use (default: python3)",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of entities to train in parallel (default: 1). Use 4–8 to finish within 24h.",
+    )
+    ap.add_argument(
+        "--park",
+        type=str,
+        help="Train only entities for this park (e.g. MK, EP, AK, BB). Entity code prefix must match.",
     )
     args = ap.parse_args()
 
@@ -277,6 +336,16 @@ def main() -> None:
         if len(entities_to_train) > sample_size:
             logger.info(f"... and {len(entities_to_train) - sample_size} more")
     
+    # Filter by park if specified
+    if args.park:
+        park_upper = args.park.strip().upper()
+        before = len(entities_to_train)
+        entities_to_train = [e for e in entities_to_train if e.upper().startswith(park_upper)]
+        logger.info(f"Park filter --park {args.park}: {len(entities_to_train)} entities (from {before})")
+        if not entities_to_train:
+            logger.warning(f"No entities found for park {args.park}")
+            sys.exit(0)
+    
     # Apply max limit if specified
     if args.max_entities and len(entities_to_train) > args.max_entities:
         logger.info(f"Limiting to first {args.max_entities} entities (from {len(entities_to_train)})")
@@ -285,6 +354,7 @@ def main() -> None:
     logger.info("=" * 60)
     logger.info(f"Training {len(entities_to_train)} entities")
     logger.info("=" * 60)
+    logger.info(f"Workers: {args.workers} (parallel entities)")
     logger.info(f"Train ratio: {args.train_ratio}, Val ratio: {args.val_ratio}")
     logger.info(f"Min ACTUAL observations for XGBoost: {args.min_observations} (entities with fewer will get mean models)")
     if args.sample:
@@ -300,27 +370,20 @@ def main() -> None:
             for code in entities_to_train
         ]
         training_set_entities(base, entities_for_status)
+        if args.workers > 1:
+            training_set_workers(base, args.workers)
     except Exception as e:
         logger.debug("Could not update pipeline status: %s", e)
 
-    # Train each entity
+    # Train each entity (sequential or parallel)
     start_time = time.time()
     results = {
         "success": [],
         "failed": [],
     }
-    
-    for i, entity_code in enumerate(entities_to_train, 1):
-        entity_display = format_entity_display(entity_code, base)
-        logger.info("-" * 60)
-        logger.info(f"[{i}/{len(entities_to_train)}] Training {entity_display}...")
 
-        try:
-            training_set_current(base, i, entity_code, "running")
-        except Exception:
-            pass
-
-        success, message = train_single_entity(
+    task_tuples = [
+        (
             entity_code,
             base,
             train_script,
@@ -330,23 +393,82 @@ def main() -> None:
             args.skip_encoding,
             args.sample,
             args.skip_park_hours,
-            logger,
         )
-        
-        if success:
-            results["success"].append(entity_code)
-            logger.info(f"  {message}")
+        for entity_code in entities_to_train
+    ]
+
+    if args.workers <= 1:
+        # Sequential (original behavior)
+        for i, entity_code in enumerate(entities_to_train, 1):
+            entity_display = format_entity_display(entity_code, base)
+            logger.info("-" * 60)
+            logger.info(f"[{i}/{len(entities_to_train)}] Training {entity_display}...")
             try:
-                training_set_current(base, i, entity_code, "done")
+                training_set_current(base, i, entity_code, "running")
             except Exception:
                 pass
-        else:
-            results["failed"].append((entity_code, message))
-            logger.warning(f"  {message}")
-            try:
-                training_set_current(base, i, entity_code, "failed")
-            except Exception:
-                pass
+            success, message = train_single_entity(
+                entity_code,
+                base,
+                train_script,
+                args.python,
+                args.train_ratio,
+                args.val_ratio,
+                args.skip_encoding,
+                args.sample,
+                args.skip_park_hours,
+                logger,
+            )
+            if success:
+                results["success"].append(entity_code)
+                logger.info(f"  {message}")
+                try:
+                    training_set_current(base, i, entity_code, "done")
+                except Exception:
+                    pass
+            else:
+                results["failed"].append((entity_code, message))
+                logger.warning(f"  {message}")
+                try:
+                    training_set_current(base, i, entity_code, "failed")
+                except Exception:
+                    pass
+    else:
+        # Parallel: N workers
+        completed = 0
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            future_to_entity = {
+                executor.submit(_train_entity_worker, t): t[0]
+                for t in task_tuples
+            }
+            for future in as_completed(future_to_entity):
+                entity_code_key = future_to_entity[future]
+                entity_display = format_entity_display(entity_code_key, base)
+                try:
+                    entity_code, success, message = future.result()
+                    completed += 1
+                    if success:
+                        results["success"].append(entity_code)
+                        try:
+                            training_set_current(base, completed, entity_code, "done")
+                        except Exception:
+                            pass
+                        logger.info(f"[{completed}/{len(entities_to_train)}] {entity_display}: {message}")
+                    else:
+                        results["failed"].append((entity_code, message))
+                        try:
+                            training_set_current(base, completed, entity_code, "failed")
+                        except Exception:
+                            pass
+                        logger.warning(f"[{completed}/{len(entities_to_train)}] {entity_display}: {message}")
+                except Exception as e:
+                    completed += 1
+                    results["failed"].append((entity_code_key, str(e)[:200]))
+                    try:
+                        training_set_current(base, completed, entity_code_key, "failed")
+                    except Exception:
+                        pass
+                    logger.warning(f"[{completed}/{len(entities_to_train)}] {entity_display}: ERROR {e}")
 
     # Summary
     total_time = time.time() - start_time

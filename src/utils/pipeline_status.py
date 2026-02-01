@@ -13,7 +13,12 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Windows
 
 STEP_ORDER = (
     "etl",
@@ -53,6 +58,33 @@ def save(output_base: Path, data: dict[str, Any]) -> None:
     data["last_updated"] = _now()
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def _load_and_save(output_base: Path, update_fn: Callable[[dict], None]) -> None:
+    """Load status, call update_fn(data), save. Uses file lock for safe concurrent updates."""
+    path = _status_path(output_base)
+    lock_path = path.parent / ".pipeline_status.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = None
+    try:
+        lock_file = open(lock_path, "w")
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    except (OSError, AttributeError):
+        pass
+    try:
+        data = load(output_base)
+        update_fn(data)
+        data["last_updated"] = _now()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    finally:
+        if lock_file is not None and fcntl is not None:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            lock_file.close()
 
 
 def _merge(data: dict, updates: dict) -> None:
@@ -112,7 +144,24 @@ def training_set_entities(output_base: Path, entities: list[dict]) -> None:
     data["training"]["total"] = len(entities)
     data["training"]["current_index"] = 0
     data["training"]["current_entity"] = None
+    data["training"].pop("workers", None)  # clear when starting new entity list
     save(output_base, data)
+
+
+def training_set_workers(output_base: Path, workers: int) -> None:
+    """Set number of parallel training workers (for dashboard)."""
+    _load_and_save(output_base, lambda data: data.setdefault("training", {}).__setitem__("workers", workers))
+
+
+def training_set_entity_status(output_base: Path, entity_code: str, status: str) -> None:
+    """Set a single entity's status (running|done|failed). Safe for concurrent calls from parallel workers."""
+    def update(data: dict) -> None:
+        data.setdefault("training", {})
+        for e in data["training"].get("entities", []):
+            if e.get("code") == entity_code:
+                e["status"] = status
+                break
+    _load_and_save(output_base, update)
 
 
 def training_set_current(

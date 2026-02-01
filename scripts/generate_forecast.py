@@ -18,6 +18,7 @@ USAGE
   python scripts/generate_forecast.py
   python scripts/generate_forecast.py --entity MK101 --start-date 2026-01-26 --end-date 2026-12-31
   python scripts/generate_forecast.py --output-base "D:\\Path" --max-entities 10
+  python scripts/generate_forecast.py --park MK   # one park only (faster test)
 """
 
 from __future__ import annotations
@@ -709,6 +710,12 @@ def main() -> None:
         help="Limit number of dates per entity (for testing)",
     )
     
+    parser.add_argument(
+        "--park",
+        type=str,
+        help="Generate forecast for this park only (e.g. MK, EP, AK). Entity code prefix must match.",
+    )
+    
     args = parser.parse_args()
     
     # Get output base
@@ -766,12 +773,19 @@ def main() -> None:
             sys.exit(1)
         
         all_entities = all_entities_df["entity_code"].tolist()
+        if args.park:
+            park_upper = args.park.strip().upper()
+            all_entities = [e for e in all_entities if e.upper().startswith(park_upper)]
+            logger.info(f"Park filter --park {args.park}: {len(all_entities)} entities")
         if args.max_entities:
             entities = all_entities[:args.max_entities]
             logger.info(f"Limited to {len(entities)} entities (of {len(all_entities)} total)")
         else:
             entities = all_entities
             logger.info(f"Processing {len(entities)} entities")
+        if not entities:
+            logger.error("No entities to process (check --park or entity index)")
+            sys.exit(1)
     
     # Generate date range
     dates = []

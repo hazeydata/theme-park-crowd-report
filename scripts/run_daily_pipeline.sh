@@ -3,6 +3,10 @@
 #
 # Order: ETL → Dimensions → Posted Aggregates → Report → Training → Forecast → WTI
 #
+# Lock: state/daily_pipeline.lock ensures only one run at a time. If the previous run
+# is still in progress (e.g. still training), this run skips cleanly (exit 0) so it
+# doesn't kill or conflict with the other run.
+#
 # Usage:
 #   ./scripts/run_daily_pipeline.sh
 #   ./scripts/run_daily_pipeline.sh --output-base /path/to/output
@@ -26,6 +30,8 @@ SKIP_REPORT=false
 SKIP_TRAINING=false
 SKIP_FORECAST=false
 SKIP_WTI=false
+SKIP_DROPBOX_CHECK=false
+PARK=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -65,6 +71,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_WTI=true
             shift
             ;;
+        --skip-dropbox-check)
+            SKIP_DROPBOX_CHECK=true
+            shift
+            ;;
+        --park)
+            PARK="$2"
+            shift 2
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -80,6 +94,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-training        Skip batch training"
             echo "  --skip-forecast        Skip forecast generation"
             echo "  --skip-wti             Skip WTI calculation"
+            echo "  --skip-dropbox-check   Do not force-quit Dropbox (use if output_base is not on Dropbox)"
+            echo "  --park PARK            Run training, forecast, and WTI for one park only (e.g. MK, EP, AK, BB)"
             exit 0
             ;;
         *)
@@ -99,12 +115,41 @@ fi
 
 cd "$PROJECT_ROOT"
 ensure_logs_dir "$OUTPUT_BASE"
+mkdir -p "$OUTPUT_BASE/state"
+
+# Force-quit Dropbox when output_base is on Dropbox (avoids file locks / partial reads)
+if ! $SKIP_DROPBOX_CHECK; then
+    ensure_dropbox_stopped "$OUTPUT_BASE"
+fi
+
+# Single daily log (set early so skip message can be written)
+LOG_FILE="$OUTPUT_BASE/logs/daily_pipeline_$(date '+%Y-%m-%d').log"
+PIPELINE_LOCK="$OUTPUT_BASE/state/daily_pipeline.lock"
+
+# Pipeline-level lock: only one run at a time. If previous run still in progress, skip (don't kill it).
+acquire_pipeline_lock() {
+    if [[ -f "$PIPELINE_LOCK" ]]; then
+        local other_pid
+        other_pid=$(sed -n 's/^PID: //p' "$PIPELINE_LOCK" 2>/dev/null | head -1)
+        if [[ -n "$other_pid" ]] && kill -0 "$other_pid" 2>/dev/null; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Previous run still in progress (PID $other_pid); skipping to avoid overlapping." >> "$LOG_FILE"
+            exit 0
+        fi
+        rm -f "$PIPELINE_LOCK"
+    fi
+    echo "PID: $$" > "$PIPELINE_LOCK"
+    echo "Start: $(date -Iseconds 2>/dev/null || date)" >> "$PIPELINE_LOCK"
+}
+release_pipeline_lock() {
+    rm -f "$PIPELINE_LOCK"
+}
+trap release_pipeline_lock EXIT
+
+acquire_pipeline_lock
 
 # Pipeline status file for dashboard
 $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" pipeline-start 2>/dev/null || true
 
-# Single daily log (append so multiple runs same day accumulate)
-LOG_FILE="$OUTPUT_BASE/logs/daily_pipeline_$(date '+%Y-%m-%d').log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Daily pipeline started. Output base: $OUTPUT_BASE" >> "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -193,12 +238,13 @@ else
     fi
 fi
 
-# 5. Batch training (train_batch_entities.py updates status file for entities)
+# 5. Batch training (--workers 4 so training finishes within 24h; train_batch_entities.py updates status file)
+# Use quoted "$OUTPUT_BASE" so paths with spaces (e.g. Dropbox) are passed as one argument.
 if $SKIP_TRAINING; then
     log_info "=== Batch training (skipped) ==="
     $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step training done 2>/dev/null || true
 else
-    if run_step "Batch training" $PYTHON scripts/train_batch_entities.py --min-age-hours 24 --output-base "$OUTPUT_BASE"; then
+    if run_step "Batch training" $PYTHON scripts/train_batch_entities.py --min-age-hours 24 --workers 4 --output-base "$OUTPUT_BASE" ${PARK:+--park "$PARK"}; then
         $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step training done 2>/dev/null || true
     else
         FAILED_ANY=true
@@ -212,7 +258,7 @@ if $SKIP_FORECAST; then
     log_info "=== Forecast (skipped) ==="
     $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step forecast done 2>/dev/null || true
 else
-    if run_step "Forecast" $PYTHON scripts/generate_forecast.py --output-base "$OUTPUT_BASE"; then
+    if run_step "Forecast" $PYTHON scripts/generate_forecast.py --output-base "$OUTPUT_BASE" ${PARK:+--park "$PARK"}; then
         $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step forecast done 2>/dev/null || true
     else
         FAILED_ANY=true
@@ -226,7 +272,7 @@ if $SKIP_WTI; then
     log_info "=== WTI (skipped) ==="
     $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step wti done 2>/dev/null || true
 else
-    if run_step "WTI" $PYTHON scripts/calculate_wti.py --output-base "$OUTPUT_BASE"; then
+    if run_step "WTI" $PYTHON scripts/calculate_wti.py --output-base "$OUTPUT_BASE" ${PARK:+--park "$PARK"}; then
         $PYTHON scripts/update_pipeline_status.py --output-base "$OUTPUT_BASE" step wti done 2>/dev/null || true
     else
         FAILED_ANY=true

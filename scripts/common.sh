@@ -64,3 +64,36 @@ ensure_logs_dir() {
     local output_base="$1"
     mkdir -p "$output_base/logs"
 }
+
+# Force-quit Dropbox before pipeline runs when output_base is on Dropbox (avoids file locks / partial reads).
+# Call with output_base; if output_base path contains "Dropbox" and Dropbox is running, stops it.
+# Usage: ensure_dropbox_stopped "$OUTPUT_BASE" || exit 1
+ensure_dropbox_stopped() {
+    local output_base="$1"
+    # Only act when output is under a path that looks like Dropbox
+    if [[ -z "$output_base" ]] || [[ "$output_base" != *[Dd]ropbox* ]]; then
+        return 0
+    fi
+    # Is Dropbox process running?
+    if ! pgrep -f '[Dd]ropbox' &>/dev/null; then
+        return 0
+    fi
+    # Dropbox is running; force stop it
+    if command -v dropbox &>/dev/null; then
+        dropbox stop 2>/dev/null || true
+    elif [[ -x "$HOME/dropbox.py" ]]; then
+        python3 "$HOME/dropbox.py" stop 2>/dev/null || true
+    else
+        pkill -TERM -f '[Dd]ropbox' 2>/dev/null || true
+    fi
+    # Wait for process(es) to exit (up to 15 seconds)
+    local wait_sec=0
+    while pgrep -f '[Dd]ropbox' &>/dev/null && [[ $wait_sec -lt 15 ]]; do
+        sleep 1
+        ((wait_sec++)) || true
+    done
+    if pgrep -f '[Dd]ropbox' &>/dev/null; then
+        echo "Dropbox did not stop after ${wait_sec}s. Pipeline may still run; sync could cause issues." >&2
+    fi
+    return 0
+}

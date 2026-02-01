@@ -40,19 +40,19 @@ generate_cron_entries() {
 $CRON_MARKER
 
 # 5:00 AM Eastern - Main ETL (incremental)
-0 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_5am.log 2>&1 $CRON_MARKER
+0 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> "$LOGS_DIR/cron_etl_5am.log" 2>&1 $CRON_MARKER
 
 # 5:30 AM Eastern - Wait time DB report
-30 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 >> $LOGS_DIR/cron_report_530am.log 2>&1 $CRON_MARKER
+30 5 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/report_wait_time_db.py --quick --lookback-days 14 >> "$LOGS_DIR/cron_report_530am.log" 2>&1 $CRON_MARKER
 
 # 6:00 AM Eastern - Dimension fetches (entity, park hours, events, metatable + build dimdategroupid, dimseason)
-0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_dimension_fetches.sh >> $LOGS_DIR/cron_dimensions_6am.log 2>&1 $CRON_MARKER
+0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_dimension_fetches.sh >> "$LOGS_DIR/cron_dimensions_6am.log" 2>&1 $CRON_MARKER
 
 # 7:00 AM Eastern - Secondary ETL (backup run)
-0 7 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> $LOGS_DIR/cron_etl_7am.log 2>&1 $CRON_MARKER
+0 7 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_etl.sh >> "$LOGS_DIR/cron_etl_7am.log" 2>&1 $CRON_MARKER
 
 # 8:00 AM Eastern - Batch training (entities needing modeling)
-0 8 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/train_batch_entities.py --min-age-hours 24 >> $LOGS_DIR/cron_training_8am.log 2>&1 $CRON_MARKER
+0 8 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $PYTHON scripts/train_batch_entities.py --min-age-hours 24 >> "$LOGS_DIR/cron_training_8am.log" 2>&1 $CRON_MARKER
 
 # Weekly tasks (Sunday) skipped - will be set up on Mac mini next week:
 #   - Sunday 6:30 AM: Posted accuracy report
@@ -70,7 +70,7 @@ generate_daily_master_entries() {
 $CRON_MARKER
 
 # 6:00 AM Eastern - Full daily pipeline (run_daily_pipeline.sh; script also tees to this log)
-0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_daily_pipeline.sh >> $LOGS_DIR/daily_pipeline_\$(date +\\%Y-\\%m-\\%d).log 2>&1 $CRON_MARKER
+0 6 * * * export PATH="\$HOME/.local/bin:\$PATH" && cd $PROJECT_ROOT && $SCRIPT_DIR/run_daily_pipeline.sh >> "$LOGS_DIR/daily_pipeline_\$(date +\\%Y-\\%m-\\%d).log" 2>&1 $CRON_MARKER
 
 EOF
 }

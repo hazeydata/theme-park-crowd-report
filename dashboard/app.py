@@ -119,6 +119,8 @@ def build_layout() -> list:
     current_entity = training.get("current_entity")
     current_index = training.get("current_index", 0)
     total_entities = training.get("total", 0)
+    training_workers = training.get("workers")
+    running_entities = [e.get("code") for e in entities_list if e.get("status") == "running"]
 
     # Entity index stats (row_count, actual_count, posted_count, priority_count, latest_park_date)
     try:
@@ -140,7 +142,7 @@ def build_layout() -> list:
             posted = int(r.get("posted_count", 0) or 0)
             priority = int(r.get("priority_count", 0) or 0)
             latest = str(r.get("latest_park_date", ""))
-        is_running = st == "running" or (current_entity and code == current_entity)
+        is_running = st == "running" or (current_entity and code == current_entity) or code in running_entities
         rows.append({
             "Entity": code,
             "Name": name,
@@ -232,10 +234,19 @@ def build_layout() -> list:
     else:
         layout.append(html.P("No recent queue-times data in staging yet.", style={"marginBottom": "24px", "fontSize": "14px", "color": "#666"}))
 
+    # Entities section: show workers and in-progress (one entity or list when parallel)
+    entities_summary = f"Total: {total_entities}  |  Completed: {current_index}"
+    if training_workers and training_workers > 1:
+        entities_summary += f"  |  Workers: {training_workers}"
+    if running_entities:
+        in_progress = ", ".join(running_entities[:8]) + (" …" if len(running_entities) > 8 else "")
+        entities_summary += f"  |  In progress: {in_progress}"
+    elif current_entity:
+        entities_summary += f"  |  In progress: {current_entity}"
     layout.extend([
         html.H2("Entities (this run)", style={"marginTop": "24px", "marginBottom": "8px"}),
-        html.P(f"Total: {total_entities}  |  Current: {current_index}  |  In progress: {current_entity or '—'}", style={"marginBottom": "12px"}),
-    ]
+        html.P(entities_summary, style={"marginBottom": "12px"}),
+    ])
 
     # Entities table — use div with overflow to avoid horizontal scroll; table fits width
     if rows:

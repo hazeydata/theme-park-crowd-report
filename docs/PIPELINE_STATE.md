@@ -37,6 +37,8 @@ Single reference for the current Theme Park pipeline setup (Linux, user **fred**
 - **Order:** ETL (incremental) → Dimension fetches → Posted aggregates → Wait time DB report → Batch training → Forecast → WTI.
 - **Runs as:** fred (your crontab).
 - **Log:** `output_base/logs/daily_pipeline_YYYY-MM-DD.log`
+- **Lock:** `state/daily_pipeline.lock` — only one run at a time. If the previous run is still in progress (e.g. still training), the next 6 AM run skips cleanly (exit 0) so it doesn’t kill or conflict with the other run.
+- **Training:** Uses `--workers 4` so batch training finishes within ~8 h (vs ~32 h sequential). See **docs/PIPELINE_TIMING_AND_PARALLELIZATION.md**.
 
 ### 3.2 Queue-times loop (systemd, on boot + always)
 
@@ -62,7 +64,7 @@ All under **output_base** unless noted.
 | `output_base/aggregates/` | posted_aggregates.parquet (for forecast) |
 | `output_base/models/` | Per-entity XGBoost (or mean) models |
 | `output_base/curves/forecast/` | Forecast curves (actual/posted predicted) |
-| `output_base/state/` | entity_index.sqlite, encoding_mappings.json, lock files, etc. |
+| `output_base/state/` | entity_index.sqlite, pipeline_status.json, daily_pipeline.lock (one run at a time), encoding_mappings.json, etc. |
 | `output_base/reports/` | wait_time_db_report.md, etc. |
 
 ---
@@ -93,6 +95,10 @@ cd /home/fred/Desktop/theme-park-crowd-report
 # Or in background with log:
 nohup ./scripts/run_daily_pipeline.sh >> "output_base/logs/daily_pipeline_$(date +%Y-%m-%d).log" 2>&1 &
 ```
+
+**Dropbox:** If `output_base` is under Dropbox, the pipeline force-quits Dropbox before starting (to avoid file locks / partial reads). It runs `dropbox stop` (or `pkill -TERM` if no CLI), waits up to 15s for exit, then proceeds. Dropbox stays stopped until you start it again (or next login if it auto-starts). Use `--skip-dropbox-check` to skip stopping Dropbox (e.g. if output is not on Dropbox).
+
+**Single-park test:** To run the pipeline for one park only (training, forecast, WTI), use `--park PARK` so the run finishes in a reasonable time during development. Example: `./scripts/run_daily_pipeline.sh --park MK`. Exclude water parks (TL, BB) when choosing; see **docs/SINGLE_PARK_TEST.md** for the entity-count query.
 
 ### Queue-times (systemd)
 
