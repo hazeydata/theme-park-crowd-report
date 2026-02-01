@@ -8,21 +8,31 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         :root {
-            --navy: #0a1628;
+            /* Hazeydata Brand */
+            --navy: #040C1F;
             --navy-light: #1e3a5f;
-            --red: #A60038;
-            --cyan: #4a90a4;
-            --white: #ffffff;
-            --gray: #94a3b8;
-            --green: #22c55e;
-            --yellow: #eab308;
+            --text-primary: #E9F4FF;
+            --text-secondary: #9BC4F2;
+            --accent: #A60038;
+            
+            /* Benedictus Scale (1-10) */
+            --level-1: #0A2F8F;
+            --level-2: #305FD1;
+            --level-3: #5A96EA;
+            --level-4: #9BC4F2;
+            --level-5: #C1DDFC;
+            --level-6: #E9F4FF;
+            --level-7: #FFE0E9;
+            --level-8: #FFB1C9;
+            --level-9: #EB427B;
+            --level-10: #A60038;
         }
         
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, var(--navy) 0%, #0f172a 100%);
+            background: linear-gradient(135deg, var(--navy) 0%, #0a1225 100%);
             min-height: 100vh;
-            color: var(--white);
+            color: var(--text-primary);
             padding: 20px;
         }
         
@@ -34,13 +44,13 @@
             align-items: center;
             margin-bottom: 30px;
             padding-bottom: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(233,244,255,0.1);
         }
         
         h1 { font-size: 2rem; display: flex; align-items: center; gap: 10px; }
         h1 span { font-size: 2.5rem; }
         
-        .timestamp { color: var(--gray); font-size: 0.9rem; }
+        .timestamp { color: var(--text-secondary); font-size: 0.9rem; }
         
         .grid {
             display: grid;
@@ -49,10 +59,10 @@
         }
         
         .card {
-            background: rgba(255,255,255,0.05);
+            background: rgba(233,244,255,0.03);
             border-radius: 16px;
             padding: 24px;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(233,244,255,0.08);
         }
         
         .card h2 {
@@ -61,22 +71,25 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            color: var(--cyan);
+            color: var(--text-secondary);
         }
         
-        .card.priority { border-left: 4px solid var(--red); }
-        .card.success { border-left: 4px solid var(--green); }
+        /* Benedictus-styled borders */
+        .card.priority { border-left: 4px solid var(--level-10); }
+        .card.success { border-left: 4px solid var(--level-2); }
+        .card.neutral { border-left: 4px solid var(--level-5); }
         
         .task-list { list-style: none; }
         .task-list li {
             padding: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(233,244,255,0.05);
             display: flex;
             align-items: center;
             gap: 10px;
         }
         .task-list li:last-child { border-bottom: none; }
         
+        /* Benedictus status badges */
         .status {
             display: inline-block;
             padding: 2px 8px;
@@ -84,9 +97,12 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
-        .status.urgent { background: var(--red); }
-        .status.active { background: var(--green); }
-        .status.waiting { background: var(--yellow); color: var(--navy); }
+        .status.critical { background: var(--level-10); color: white; }
+        .status.high { background: var(--level-9); color: white; }
+        .status.medium { background: var(--level-7); color: var(--navy); }
+        .status.low { background: var(--level-4); color: var(--navy); }
+        .status.good { background: var(--level-2); color: white; }
+        .status.empty { background: var(--level-1); color: white; }
         
         .links-grid {
             display: grid;
@@ -99,27 +115,30 @@
             align-items: center;
             gap: 8px;
             padding: 12px 16px;
-            background: rgba(255,255,255,0.1);
+            background: rgba(233,244,255,0.08);
             border-radius: 8px;
-            color: var(--white);
+            color: var(--text-primary);
             text-decoration: none;
             transition: background 0.2s;
         }
-        .link-btn:hover { background: rgba(255,255,255,0.2); }
+        .link-btn:hover { background: rgba(233,244,255,0.15); }
         
         .date-card {
             display: flex;
             justify-content: space-between;
             padding: 10px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(233,244,255,0.05);
         }
         .date-card:last-child { border-bottom: none; }
         .days-out {
-            background: var(--navy-light);
+            background: var(--level-3);
+            color: white;
             padding: 4px 12px;
             border-radius: 20px;
             font-size: 0.85rem;
         }
+        .days-out.soon { background: var(--level-8); color: var(--navy); }
+        .days-out.imminent { background: var(--level-10); color: white; }
         
         .crew-grid {
             display: grid;
@@ -131,7 +150,7 @@
             align-items: center;
             gap: 10px;
             padding: 10px;
-            background: rgba(255,255,255,0.05);
+            background: rgba(233,244,255,0.05);
             border-radius: 8px;
         }
         .crew-avatar {
@@ -146,16 +165,26 @@
         }
         .crew-info { flex: 1; }
         .crew-name { font-weight: 600; font-size: 0.9rem; }
-        .crew-role { font-size: 0.75rem; color: var(--gray); }
+        .crew-role { font-size: 0.75rem; color: var(--text-secondary); }
         
         .intel-item {
             padding: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(233,244,255,0.05);
         }
         .intel-item:last-child { border-bottom: none; }
-        .intel-item strong { color: var(--cyan); }
+        .intel-item strong { color: var(--text-secondary); }
         
         .full-width { grid-column: 1 / -1; }
+        
+        /* Benedictus scale preview */
+        .scale-preview {
+            display: flex;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 16px;
+        }
+        .scale-preview div { flex: 1; }
         
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; }
@@ -177,15 +206,15 @@
                 <h2>🎯 Today's Focus</h2>
                 <ul class="task-list">
                     <li>
-                        <span class="status urgent">TODAY</span>
+                        <span class="status critical">NOW</span>
                         <span>Review Pebbles' stream design specs</span>
                     </li>
                     <li>
-                        <span class="status active">READY</span>
+                        <span class="status good">READY</span>
                         <span>Bam-Bam: Implement pipeline optimization</span>
                     </li>
                     <li>
-                        <span class="status waiting">WAITING</span>
+                        <span class="status medium">WAITING</span>
                         <span>Mac Mini arrives in 3 days</span>
                     </li>
                 </ul>
@@ -204,7 +233,7 @@
                     <a href="https://dash.cloudflare.com" class="link-btn" target="_blank">
                         ☁️ Cloudflare
                     </a>
-                    <a href="https://figma.com" class="link-btn" target="_blank">
+                    <a href="https://www.figma.com/design/JPWe8gZd4VPmAvnK6tLha1/hazeydata.ai" class="link-btn" target="_blank">
                         🎨 Figma
                     </a>
                 </div>
@@ -215,11 +244,11 @@
                 <h2>📅 Key Dates</h2>
                 <div class="date-card">
                     <span>🖥️ Mac Mini arrives</span>
-                    <span class="days-out">Feb 4 — 3 days</span>
+                    <span class="days-out soon">Feb 4 — 3 days</span>
                 </div>
                 <div class="date-card">
                     <span>💰 Wilma Autonomy starts</span>
-                    <span class="days-out">Feb 4 — 3 days</span>
+                    <span class="days-out soon">Feb 4 — 3 days</span>
                 </div>
                 <div class="date-card">
                     <span>👤 John visits</span>
@@ -271,22 +300,35 @@
                 <h2>🚀 Active Projects</h2>
                 <ul class="task-list">
                     <li>
-                        <span class="status urgent">URGENT</span>
+                        <span class="status critical">URGENT</span>
                         <strong>Twitch Stream</strong> — Waiting on Mac Mini, overlay specs from Pebbles
                     </li>
                     <li>
-                        <span class="status active">IN DEV</span>
+                        <span class="status good">IN DEV</span>
                         <strong>Theme Park Crowd Report</strong> — Pipeline training, speed optimization with Bam-Bam
                     </li>
                     <li>
-                        <span class="status active">LIVE</span>
+                        <span class="status low">LIVE</span>
                         <strong>hazeydata.ai</strong> — Live, needs content updates
                     </li>
                 </ul>
+                <!-- Benedictus scale preview -->
+                <div class="scale-preview">
+                    <div style="background: var(--level-1)"></div>
+                    <div style="background: var(--level-2)"></div>
+                    <div style="background: var(--level-3)"></div>
+                    <div style="background: var(--level-4)"></div>
+                    <div style="background: var(--level-5)"></div>
+                    <div style="background: var(--level-6)"></div>
+                    <div style="background: var(--level-7)"></div>
+                    <div style="background: var(--level-8)"></div>
+                    <div style="background: var(--level-9)"></div>
+                    <div style="background: var(--level-10)"></div>
+                </div>
             </div>
             
             <!-- Theme Park Intel -->
-            <div class="card">
+            <div class="card neutral">
                 <h2>🎢 Theme Park Intel</h2>
                 <div class="intel-item">
                     <strong>DINOSAUR closed</strong> — DinoLand making way for Tropical Americas
@@ -304,11 +346,11 @@
                 <h2>⏰ Automated Tasks</h2>
                 <ul class="task-list">
                     <li>
-                        <span class="status active">OK</span>
+                        <span class="status good">OK</span>
                         <span>Pipeline Review — Daily 3am</span>
                     </li>
                     <li>
-                        <span class="status active">OK</span>
+                        <span class="status good">OK</span>
                         <span>Overnight Surprise — Daily 4am</span>
                     </li>
                 </ul>
