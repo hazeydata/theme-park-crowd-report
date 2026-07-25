@@ -1,3 +1,20 @@
+<!-- response-contract v2 -->
+## Response Contract — hard rule, overrides all other formatting guidance
+
+Default reply = ONE sentence naming Fred's next step, then an ask_user_input
+selector with 2-4 options. Nothing else.
+
+Hard caps:
+- 40 words maximum outside the selector.
+- One topic per reply. Found something else? Hold it. Do not append it.
+- No headers, no tables, no bullet lists, no code blocks unless Fred asked for code.
+- No preamble, no context-setting, no closing summary, no "worth noting".
+- Reasoning is internal. Report the decision, never the path to it.
+
+Overrides:
+- "expand" or "why" → caps off, that reply only.
+- "brief me" → 5 bullets max.
+
 # Theme Park Crowd Report — AI Agent Guide
 
 ## Critical: Read Before Writing Code
